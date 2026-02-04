@@ -1,0 +1,11 @@
+venv/
+.venv/
+.env
+*.pyc
+__pycache__/
+Data_set_2/*
+Data_set/*
+modelo_guardado/*requirements.txt.bak
+
+./images/*
+/images
