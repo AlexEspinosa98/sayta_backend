@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'health',
+    'translator_api',
 ]
 
 MIDDLEWARE = [
@@ -121,3 +122,7 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Ruta base donde se encuentran los artefactos del traductor Ette.
+# Se movieron al directorio interno de la app para evitar depender de carpetas externas.
+ETTE_EMBEDDINGS_DIR = BASE_DIR / 'translator_api' / 'embeddings'

@@ -1,0 +1,790 @@
+[
+  {
+    "source": "aara",
+    "target": "cazadora"
+  },
+  {
+    "source": "aara",
+    "target": "gusano"
+  },
+  {
+    "source": "aara",
+    "target": "loro"
+  },
+  {
+    "source": "ac",
+    "target": "gro"
+  },
+  {
+    "source": "ajga",
+    "target": "atajar"
+  },
+  {
+    "source": "ajgo",
+    "target": "ajm"
+  },
+  {
+    "source": "ajgo",
+    "target": "andar"
+  },
+  {
+    "source": "akkari",
+    "target": "andar"
+  },
+  {
+    "source": "akkari",
+    "target": "patio"
+  },
+  {
+    "source": "alf",
+    "target": "mana"
+  },
+  {
+    "source": "beekranña",
+    "target": "ardica"
+  },
+  {
+    "source": "biikra",
+    "target": "ardita"
+  },
+  {
+    "source": "brajgata",
+    "target": "chirrio"
+  },
+  {
+    "source": "brajgata",
+    "target": "provocar"
+  },
+  {
+    "source": "brazmujua",
+    "target": "movkar somo"
+  },
+  {
+    "source": "bruu",
+    "target": "bicho"
+  },
+  {
+    "source": "bruu",
+    "target": "carauta"
+  },
+  {
+    "source": "bujmisa",
+    "target": "bruguti ad"
+  },
+  {
+    "source": "chicho",
+    "target": "chicho"
+  },
+  {
+    "source": "chiki",
+    "target": "chimila"
+  },
+  {
+    "source": "chiki",
+    "target": "chiquita"
+  },
+  {
+    "source": "dassi",
+    "target": "dannu"
+  },
+  {
+    "source": "deerakwajor",
+    "target": "cuñado"
+  },
+  {
+    "source": "deerakwajor",
+    "target": "mazamorra"
+  },
+  {
+    "source": "dippina",
+    "target": "acriba"
+  },
+  {
+    "source": "dippina",
+    "target": "dios"
+  },
+  {
+    "source": "dippina",
+    "target": "tocrar"
+  },
+  {
+    "source": "dl",
+    "target": "hanto"
+  },
+  {
+    "source": "dujbrariya",
+    "target": "nudo"
+  },
+  {
+    "source": "dujbrariya",
+    "target": "yuca"
+  },
+  {
+    "source": "dukkiwrakratikra",
+    "target": "abajo"
+  },
+  {
+    "source": "duuña",
+    "target": "abajo"
+  },
+  {
+    "source": "duuña",
+    "target": "avór"
+  },
+  {
+    "source": "ejkiya",
+    "target": "particular"
+  },
+  {
+    "source": "ekuna",
+    "target": "ad propio"
+  },
+  {
+    "source": "ekuna",
+    "target": "antiguos"
+  },
+  {
+    "source": "ekuna",
+    "target": "chimilas"
+  },
+  {
+    "source": "ekuna",
+    "target": "tadio"
+  },
+  {
+    "source": "enoegragea",
+    "target": "arhuacos"
+  },
+  {
+    "source": "eri",
+    "target": "guartinaja"
+  },
+  {
+    "source": "ewikasu",
+    "target": "ardira"
+  },
+  {
+    "source": "ewikasu",
+    "target": "atizar"
+  },
+  {
+    "source": "ewikasu",
+    "target": "guacamayo"
+  },
+  {
+    "source": "fiajga",
+    "target": "ros"
+  },
+  {
+    "source": "fu",
+    "target": "barbaco"
+  },
+  {
+    "source": "gafpwwra",
+    "target": "bracito"
+  },
+  {
+    "source": "gafpwwra",
+    "target": "raicilla"
+  },
+  {
+    "source": "gruuke",
+    "target": "aduho"
+  },
+  {
+    "source": "gruuke",
+    "target": "anciano"
+  },
+  {
+    "source": "gruuke",
+    "target": "mayor"
+  },
+  {
+    "source": "guntu",
+    "target": "sobrino"
+  },
+  {
+    "source": "iae",
+    "target": "monja"
+  },
+  {
+    "source": "iae",
+    "target": "nada"
+  },
+  {
+    "source": "jjattewa",
+    "target": "cuñada"
+  },
+  {
+    "source": "jjeguyo",
+    "target": "ttija"
+  },
+  {
+    "source": "jonta",
+    "target": "laba"
+  },
+  {
+    "source": "jonta",
+    "target": "larariilas"
+  },
+  {
+    "source": "jonta",
+    "target": "mico"
+  },
+  {
+    "source": "joosobriri",
+    "target": "chupado"
+  },
+  {
+    "source": "joowariya",
+    "target": "campanitas"
+  },
+  {
+    "source": "jooya",
+    "target": "olla"
+  },
+  {
+    "source": "jun",
+    "target": "bonito"
+  },
+  {
+    "source": "kaamisa",
+    "target": "camisa"
+  },
+  {
+    "source": "kajbrikatr",
+    "target": "babillo"
+  },
+  {
+    "source": "kajbrikatr",
+    "target": "ballomojoso"
+  },
+  {
+    "source": "kajbrikatr",
+    "target": "bolloblanco"
+  },
+  {
+    "source": "kajbrikatr",
+    "target": "canoa"
+  },
+  {
+    "source": "kajbrikatr",
+    "target": "cigarróo"
+  },
+  {
+    "source": "kajbrikatr",
+    "target": "ilbrquéla"
+  },
+  {
+    "source": "kajbrikatr",
+    "target": "palizadas"
+  },
+  {
+    "source": "kassarmanta",
+    "target": "tobillo"
+  },
+  {
+    "source": "kattikoro",
+    "target": "batata"
+  },
+  {
+    "source": "kogskrasu",
+    "target": "cañadia"
+  },
+  {
+    "source": "kogskrasu",
+    "target": "loco"
+  },
+  {
+    "source": "kruatoye",
+    "target": "fila"
+  },
+  {
+    "source": "kuu",
+    "target": "bujto"
+  },
+  {
+    "source": "kuu",
+    "target": "cucaracho"
+  },
+  {
+    "source": "kuu",
+    "target": "matapiojos"
+  },
+  {
+    "source": "kuukwita",
+    "target": "compa"
+  },
+  {
+    "source": "kuukwita",
+    "target": "guacantapa"
+  },
+  {
+    "source": "kwazwza",
+    "target": "macondo"
+  },
+  {
+    "source": "laakiwi",
+    "target": "coroucoro"
+  },
+  {
+    "source": "laakiwi",
+    "target": "majz cuba"
+  },
+  {
+    "source": "laakiwi",
+    "target": "maniapaloma"
+  },
+  {
+    "source": "lantimata",
+    "target": "armadillo"
+  },
+  {
+    "source": "lantimata",
+    "target": "armadillo moján"
+  },
+  {
+    "source": "lantimata",
+    "target": "armadillo mojén"
+  },
+  {
+    "source": "lantimata",
+    "target": "lakkratoro"
+  },
+  {
+    "source": "lantimata",
+    "target": "maja cuba"
+  },
+  {
+    "source": "liwi",
+    "target": "bonga"
+  },
+  {
+    "source": "liwi",
+    "target": "chicho"
+  },
+  {
+    "source": "liwi",
+    "target": "pacopaco"
+  },
+  {
+    "source": "ls",
+    "target": "waakwarig chicharra"
+  },
+  {
+    "source": "luggali",
+    "target": "araña"
+  },
+  {
+    "source": "luggali",
+    "target": "basura"
+  },
+  {
+    "source": "luggali",
+    "target": "comasito"
+  },
+  {
+    "source": "luggali",
+    "target": "orac parga"
+  },
+  {
+    "source": "luggali",
+    "target": "tomasito"
+  },
+  {
+    "source": "maajgowi",
+    "target": "malambo"
+  },
+  {
+    "source": "maajgowi",
+    "target": "mango"
+  },
+  {
+    "source": "maajgowi",
+    "target": "tapaculo"
+  },
+  {
+    "source": "malka",
+    "target": "mannipo bordón"
+  },
+  {
+    "source": "malka",
+    "target": "manta mapaná"
+  },
+  {
+    "source": "malka",
+    "target": "mapana"
+  },
+  {
+    "source": "mojmata",
+    "target": "chinchalin"
+  },
+  {
+    "source": "mowita",
+    "target": "micco"
+  },
+  {
+    "source": "nyugga",
+    "target": "mi cimarrón"
+  },
+  {
+    "source": "oyuklkewa",
+    "target": "joak ru"
+  },
+  {
+    "source": "oyuklkewa",
+    "target": "mosca"
+  },
+  {
+    "source": "paapakra",
+    "target": "pralanakra"
+  },
+  {
+    "source": "paapelu",
+    "target": "galandria"
+  },
+  {
+    "source": "paapelu",
+    "target": "garrapatita"
+  },
+  {
+    "source": "paapelu",
+    "target": "guinco"
+  },
+  {
+    "source": "parvati",
+    "target": "tadros"
+  },
+  {
+    "source": "peegku",
+    "target": "guacharaca"
+  },
+  {
+    "source": "peegku",
+    "target": "maga"
+  },
+  {
+    "source": "peentusula",
+    "target": "bonisa"
+  },
+  {
+    "source": "peeuru",
+    "target": "prima"
+  },
+  {
+    "source": "piiwija",
+    "target": "golondrina"
+  },
+  {
+    "source": "piiwija",
+    "target": "lucia"
+  },
+  {
+    "source": "piiwija",
+    "target": "lucta"
+  },
+  {
+    "source": "piiwija",
+    "target": "martica"
+  },
+  {
+    "source": "piojo",
+    "target": "guasaw"
+  },
+  {
+    "source": "piojo",
+    "target": "pavo"
+  },
+  {
+    "source": "pitt",
+    "target": "chupalor"
+  },
+  {
+    "source": "pripawi",
+    "target": "yuca"
+  },
+  {
+    "source": "rajeawi",
+    "target": "rakata"
+  },
+  {
+    "source": "rajeawi",
+    "target": "ratón"
+  },
+  {
+    "source": "ría",
+    "target": "vomitar"
+  },
+  {
+    "source": "sebñomonte",
+    "target": "chicharcón"
+  },
+  {
+    "source": "sebñomonte",
+    "target": "grillo"
+  },
+  {
+    "source": "sebñomonte",
+    "target": "tato"
+  },
+  {
+    "source": "sikkikra",
+    "target": "capacho"
+  },
+  {
+    "source": "sikkikra",
+    "target": "grillo"
+  },
+  {
+    "source": "ssuf",
+    "target": "gillo"
+  },
+  {
+    "source": "ta",
+    "target": "gustar"
+  },
+  {
+    "source": "takala",
+    "target": "contrapatoco"
+  },
+  {
+    "source": "takala",
+    "target": "médico tradicional"
+  },
+  {
+    "source": "teeko",
+    "target": "unos"
+  },
+  {
+    "source": "titekwy",
+    "target": "a titigokko"
+  },
+  {
+    "source": "titekwy",
+    "target": "bonpa"
+  },
+  {
+    "source": "titekwy",
+    "target": "botifo"
+  },
+  {
+    "source": "titekwy",
+    "target": "chimilas"
+  },
+  {
+    "source": "titekwy",
+    "target": "mañz"
+  },
+  {
+    "source": "titekwy",
+    "target": "pimpina"
+  },
+  {
+    "source": "titekwy",
+    "target": "sinón tiipkwa"
+  },
+  {
+    "source": "titekwy",
+    "target": "timbo"
+  },
+  {
+    "source": "tiwramisa",
+    "target": "pio"
+  },
+  {
+    "source": "tonna",
+    "target": "tio"
+  },
+  {
+    "source": "tonna",
+    "target": "tio concjo"
+  },
+  {
+    "source": "tonna",
+    "target": "toroafi"
+  },
+  {
+    "source": "tua",
+    "target": "mamo saíno"
+  },
+  {
+    "source": "tua",
+    "target": "ncg ro"
+  },
+  {
+    "source": "tua",
+    "target": "sanca cruz"
+  },
+  {
+    "source": "tuggraya",
+    "target": "bonga majagua"
+  },
+  {
+    "source": "tuggraya",
+    "target": "caña brava"
+  },
+  {
+    "source": "tuggraya",
+    "target": "tolúa"
+  },
+  {
+    "source": "tuggraya",
+    "target": "tujga"
+  },
+  {
+    "source": "tuggraya",
+    "target": "yaquito"
+  },
+  {
+    "source": "ukkwalwekkwedai",
+    "target": "chicharrón"
+  },
+  {
+    "source": "ulclora",
+    "target": "hachar"
+  },
+  {
+    "source": "ungowl",
+    "target": "coclada"
+  },
+  {
+    "source": "ungowl",
+    "target": "compras"
+  },
+  {
+    "source": "uukri",
+    "target": "armadillo"
+  },
+  {
+    "source": "uukri",
+    "target": "banco"
+  },
+  {
+    "source": "uukri",
+    "target": "banquito"
+  },
+  {
+    "source": "uukri",
+    "target": "hanco"
+  },
+  {
+    "source": "wa",
+    "target": "amañarso"
+  },
+  {
+    "source": "wa",
+    "target": "hallarsc"
+  },
+  {
+    "source": "waajau",
+    "target": "bajapua"
+  },
+  {
+    "source": "waakwamooree",
+    "target": "babilla"
+  },
+  {
+    "source": "waakwamooree",
+    "target": "colirio"
+  },
+  {
+    "source": "waakwamooree",
+    "target": "guacamayx"
+  },
+  {
+    "source": "waakwattu",
+    "target": "bocona"
+  },
+  {
+    "source": "waakwattu",
+    "target": "mapaní"
+  },
+  {
+    "source": "waame",
+    "target": "mariposas"
+  },
+  {
+    "source": "waamujna",
+    "target": "iguana"
+  },
+  {
+    "source": "waarita",
+    "target": "anamú"
+  },
+  {
+    "source": "waarita",
+    "target": "avispa bocabajo"
+  },
+  {
+    "source": "waarita",
+    "target": "bauti zar"
+  },
+  {
+    "source": "waarita",
+    "target": "bautizar"
+  },
+  {
+    "source": "waarita",
+    "target": "cadillo"
+  },
+  {
+    "source": "wajnoo",
+    "target": "colba roja"
+  },
+  {
+    "source": "wajnoo",
+    "target": "libélula"
+  },
+  {
+    "source": "wajnoo",
+    "target": "tolúa"
+  },
+  {
+    "source": "waznala",
+    "target": "chichatra"
+  },
+  {
+    "source": "wiipuwipu",
+    "target": "mazamorca"
+  },
+  {
+    "source": "wiipuwipu",
+    "target": "médico"
+  },
+  {
+    "source": "wwad",
+    "target": "bocachico"
+  },
+  {
+    "source": "wwad",
+    "target": "cuñado"
+  },
+  {
+    "source": "yal",
+    "target": "fadrco"
+  },
+  {
+    "source": "yal",
+    "target": "maluco"
+  },
+  {
+    "source": "yal",
+    "target": "paric"
+  },
+  {
+    "source": "yuglkwitikkwi",
+    "target": "galápago"
+  },
+  {
+    "source": "yummesu",
+    "target": "ammara"
+  },
+  {
+    "source": "yummesu",
+    "target": "calabacito"
+  },
+  {
+    "source": "yummesu",
+    "target": "matriz"
+  }
+]
