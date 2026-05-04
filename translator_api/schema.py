@@ -118,6 +118,43 @@ OPENAPI_SCHEMA = {
                 },
             },
         },
+        "/api/grabaciones/debug/path/": {
+            "get": {
+                "tags": ["Grabaciones"],
+                "summary": "Diagnóstico de ruta de grabaciones",
+                "description": (
+                    "Devuelve el directorio de trabajo actual del servidor (`pwd`), "
+                    "la ruta configurada para las grabaciones y si dicha ruta existe en el sistema de archivos."
+                ),
+                "operationId": "recordings_debug_path",
+                "responses": {
+                    "200": {
+                        "description": "Información de rutas del servidor",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "pwd": {
+                                            "type": "string",
+                                            "example": "/home/user/sayta_backend",
+                                        },
+                                        "grabaciones_base_path": {
+                                            "type": "string",
+                                            "example": "/mnt/sayta_data/data/Grabaciones",
+                                        },
+                                        "existe": {
+                                            "type": "boolean",
+                                            "example": True,
+                                        },
+                                    },
+                                }
+                            }
+                        },
+                    }
+                },
+            }
+        },
         "/api/grabaciones/": {
             "get": {
                 "tags": ["Grabaciones"],
