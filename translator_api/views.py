@@ -356,10 +356,16 @@ def recordings_debug_path_view(request: HttpRequest):
             contenido = ["(sin permiso)"]
         pasos.append({"nivel": i + 1, "path": str(base), "contenido": contenido})
 
+    try:
+        contenido_mnt = sorted(os.listdir("/mnt"))
+    except Exception as e:
+        contenido_mnt = [str(e)]
+
     return JsonResponse({
         "pwd": str(pwd),
         "grabaciones_base_path": str(GRABACIONES_BASE_PATH),
         "existe": GRABACIONES_BASE_PATH.exists(),
+        "contenido_mnt": contenido_mnt,
         "pasos_cd_arriba": pasos,
     })
 
