@@ -344,18 +344,16 @@ def translate_view(request: HttpRequest):
 
 
 def recordings_debug_path_view(request: HttpRequest):
-    base = Path(settings.BASE_DIR)
-    pasos = []
-    for i in range(4):
+    base = Path(os.getcwd())
+    pasos = [{"nivel": 0, "path": str(base)}]
+    for i in range(5):
         base = base.parent
         pasos.append({"nivel": i + 1, "path": str(base)})
 
     return JsonResponse({
-        "pwd": os.getcwd(),
-        "base_dir": str(settings.BASE_DIR),
-        "pasos_cd_arriba": pasos,
         "grabaciones_base_path": str(GRABACIONES_BASE_PATH),
         "existe": GRABACIONES_BASE_PATH.exists(),
+        "pasos_cd_arriba": pasos,
     })
 
 
