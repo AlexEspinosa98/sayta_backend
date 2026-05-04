@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+numpy
+faiss-cpu
+sentence-transformers
+torch

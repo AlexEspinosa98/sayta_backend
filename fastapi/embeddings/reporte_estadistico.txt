@@ -1,0 +1,29 @@
+===== REPORTE =====
+Total entradas: 3912
+
+Distribución POS:
+POS: 15
+NOM: 2002
+PR: 282
+ADV: 173
+VRB: 1067
+INT: 432
+TRS: 600
+PL: 12
+EXCL: 23
+PL4: 228
+PL1: 471
+ADJ: 193
+AUX: 10
+PRON: 43
+INTG: 27
+IMP: 37
+DTR: 6
+PL3: 32
+SUF: 83
+LOC: 18
+CLS: 73
+NUM: 72
+IDEO: 18
+PL2: 23
+CONJ: 2
