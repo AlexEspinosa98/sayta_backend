@@ -7,6 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from django.conf import settings
 from django.http import JsonResponse, HttpRequest, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from .schema import OPENAPI_SCHEMA
@@ -48,7 +49,13 @@ ETTE_PROFANITIES = {
     "aaǥa",  # ejemplo ilustrativo
 }
 
-GRABACIONES_BASE_PATH = Path("/mnt/sayta_data/data/Grabaciones")
+def _build_grabaciones_path() -> Path:
+    base = Path(settings.BASE_DIR)
+    for _ in range(4):
+        base = base.parent
+    return base / "mnt" / "sayta_data" / "data" / "Grabaciones"
+
+GRABACIONES_BASE_PATH = _build_grabaciones_path()
 
 MONTHS_ES = {
     "enero": 1,
@@ -337,8 +344,16 @@ def translate_view(request: HttpRequest):
 
 
 def recordings_debug_path_view(request: HttpRequest):
+    base = Path(settings.BASE_DIR)
+    pasos = []
+    for i in range(4):
+        base = base.parent
+        pasos.append({"nivel": i + 1, "path": str(base)})
+
     return JsonResponse({
         "pwd": os.getcwd(),
+        "base_dir": str(settings.BASE_DIR),
+        "pasos_cd_arriba": pasos,
         "grabaciones_base_path": str(GRABACIONES_BASE_PATH),
         "existe": GRABACIONES_BASE_PATH.exists(),
     })
