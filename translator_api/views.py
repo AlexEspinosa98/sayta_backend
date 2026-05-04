@@ -94,45 +94,67 @@ def _format_duration(total_seconds: float) -> str:
 
 
 def _audio_duration_seconds(path: Path) -> Optional[float]:
+    # Mutagen primero: soporta WAV PCM, WAV comprimido, MP3, MP4, OGG, FLAC
     try:
-        if path.suffix.lower() == ".wav":
-            import wave as _wave
-            with _wave.open(str(path), "rb") as wf:
-                return wf.getnframes() / wf.getframerate()
         from mutagen import File as _MFile  # type: ignore
         af = _MFile(str(path))
         if af and af.info:
             return float(af.info.length)
+    except ImportError:
+        pass
     except Exception:
         pass
+    # Fallback stdlib para WAV PCM estándar si mutagen no está instalado
+    if path.suffix.lower() == ".wav":
+        try:
+            import wave as _wave
+            with _wave.open(str(path), "rb") as wf:
+                frames = wf.getnframes()
+                rate = wf.getframerate()
+                if rate > 0:
+                    return frames / rate
+        except Exception:
+            pass
     return None
 
 
 def _scan_audios_sin_procesar(session_dir: Path) -> Dict:
     folder = session_dir / "audios_sin_procesar"
+    procesados_folder = session_dir / "audios_procesados"
     if not folder.exists() or not folder.is_dir():
         return {
             "total_audios": 0,
             "duracion_segundos": 0.0,
             "duracion_formateada": "0h 00m 00s",
             "sin_metadata": 0,
+            "etiquetados": 0,
+            "sin_etiquetar": 0,
+            "porcentaje_completado": 0.0,
         }
     total = 0
     seconds = 0.0
     sin_meta = 0
+    etiquetados = 0
     for f in sorted(folder.iterdir()):
-        if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS:
-            total += 1
-            d = _audio_duration_seconds(f)
-            if d is not None:
-                seconds += d
-            else:
-                sin_meta += 1
+        if not f.is_file() or f.suffix.lower() not in AUDIO_EXTENSIONS:
+            continue
+        total += 1
+        d = _audio_duration_seconds(f)
+        if d is not None:
+            seconds += d
+        else:
+            sin_meta += 1
+        if (procesados_folder / f"{f.stem}.txt").exists():
+            etiquetados += 1
+    sin_etiquetar = total - etiquetados
     return {
         "total_audios": total,
         "duracion_segundos": round(seconds, 2),
         "duracion_formateada": _format_duration(seconds),
         "sin_metadata": sin_meta,
+        "etiquetados": etiquetados,
+        "sin_etiquetar": sin_etiquetar,
+        "porcentaje_completado": round(etiquetados / total * 100, 1) if total > 0 else 0.0,
     }
 
 
@@ -445,21 +467,30 @@ def recordings_root_view(request: HttpRequest):
         total_audios = 0
         total_seconds = 0.0
         sin_meta = 0
+        total_etiquetados = 0
+        total_sin_etiquetar = 0
         for s in sessions:
             stats = _scan_audios_sin_procesar(s)
             total_audios += stats["total_audios"]
             total_seconds += stats["duracion_segundos"]
             sin_meta += stats["sin_metadata"]
+            total_etiquetados += stats["etiquetados"]
+            total_sin_etiquetar += stats["sin_etiquetar"]
         communities_summary.append(
             {
                 "comunidad": community_dir.name,
                 "total_jornadas": len(sessions),
                 "total_archivos": _count_files_recursive(community_dir),
-                "audios_sin_procesar": {
-                    "total_audios": total_audios,
+                "audios": {
+                    "total": total_audios,
                     "duracion_segundos": round(total_seconds, 2),
                     "duracion_formateada": _format_duration(total_seconds),
-                    "sin_metadata": sin_meta,
+                    "sin_metadata_duracion": sin_meta,
+                    "etiquetados": total_etiquetados,
+                    "sin_etiquetar": total_sin_etiquetar,
+                    "porcentaje_completado": round(
+                        total_etiquetados / total_audios * 100, 1
+                    ) if total_audios > 0 else 0.0,
                 },
             }
         )
@@ -524,27 +555,42 @@ def recordings_by_community_view(request: HttpRequest, community: str):
     recordings = _list_directories(community_dir)
     payload = []
     for rec in recordings:
-        audio_stats = _scan_audios_sin_procesar(rec)
+        s = _scan_audios_sin_procesar(rec)
         payload.append(
             {
                 "nombre": rec.name,
                 **_parse_session_name(rec.name),
                 "total_items": _count_items_in_dir(rec),
-                "audios_sin_procesar": audio_stats,
+                "audios": {
+                    "total": s["total_audios"],
+                    "duracion_segundos": s["duracion_segundos"],
+                    "duracion_formateada": s["duracion_formateada"],
+                    "sin_metadata_duracion": s["sin_metadata"],
+                    "etiquetados": s["etiquetados"],
+                    "sin_etiquetar": s["sin_etiquetar"],
+                    "porcentaje_completado": s["porcentaje_completado"],
+                },
             }
         )
 
-    total_audios = sum(j["audios_sin_procesar"]["total_audios"] for j in payload)
-    total_seconds = sum(j["audios_sin_procesar"]["duracion_segundos"] for j in payload)
+    total_audios = sum(j["audios"]["total"] for j in payload)
+    total_seconds = sum(j["audios"]["duracion_segundos"] for j in payload)
+    total_etiquetados = sum(j["audios"]["etiquetados"] for j in payload)
+    total_sin_etiquetar = sum(j["audios"]["sin_etiquetar"] for j in payload)
 
     return JsonResponse(
         {
             "comunidad": community_dir.name,
             "total_jornadas": len(payload),
-            "resumen_audio": {
+            "resumen": {
                 "total_audios": total_audios,
                 "duracion_formateada": _format_duration(total_seconds),
                 "duracion_segundos": round(total_seconds, 2),
+                "etiquetados": total_etiquetados,
+                "sin_etiquetar": total_sin_etiquetar,
+                "porcentaje_completado": round(
+                    total_etiquetados / total_audios * 100, 1
+                ) if total_audios > 0 else 0.0,
             },
             "jornadas": payload,
         }
