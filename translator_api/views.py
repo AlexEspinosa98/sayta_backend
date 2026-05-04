@@ -344,13 +344,20 @@ def translate_view(request: HttpRequest):
 
 
 def recordings_debug_path_view(request: HttpRequest):
-    base = Path(os.getcwd())
-    pasos = [{"nivel": 0, "path": str(base)}]
+    pwd = Path(os.getcwd())
+
+    pasos = []
+    base = pwd
     for i in range(5):
         base = base.parent
-        pasos.append({"nivel": i + 1, "path": str(base)})
+        try:
+            contenido = sorted(os.listdir(base))
+        except PermissionError:
+            contenido = ["(sin permiso)"]
+        pasos.append({"nivel": i + 1, "path": str(base), "contenido": contenido})
 
     return JsonResponse({
+        "pwd": str(pwd),
         "grabaciones_base_path": str(GRABACIONES_BASE_PATH),
         "existe": GRABACIONES_BASE_PATH.exists(),
         "pasos_cd_arriba": pasos,
