@@ -48,9 +48,7 @@ ETTE_PROFANITIES = {
     "aaǥa",  # ejemplo ilustrativo
 }
 
-GRABACIONES_BASE_PATH = Path(
-    os.getenv("GRABACIONES_BASE_PATH", "/mnt/sayta_data/data/Grabaciones")
-).resolve()
+GRABACIONES_BASE_PATH = Path("/mnt/sayta_data/data/Grabaciones")
 
 MONTHS_ES = {
     "enero": 1,
@@ -336,6 +334,14 @@ def translate_view(request: HttpRequest):
         }
 
     return JsonResponse(response)
+
+
+def recordings_debug_path_view(request: HttpRequest):
+    return JsonResponse({
+        "pwd": os.getcwd(),
+        "grabaciones_base_path": str(GRABACIONES_BASE_PATH),
+        "existe": GRABACIONES_BASE_PATH.exists(),
+    })
 
 
 def recordings_root_view(request: HttpRequest):
