@@ -7,8 +7,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from django.http import JsonResponse, HttpRequest
+from django.http import JsonResponse, HttpRequest, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
+from .schema import OPENAPI_SCHEMA
 from .search_engine import load_metadata as se_load_metadata, semantic_search
 
 
@@ -372,6 +373,39 @@ def recordings_root_view(request: HttpRequest):
             "resumen_comunidades": communities_summary,
         }
     )
+
+
+def openapi_schema_view(request: HttpRequest):
+    return JsonResponse(OPENAPI_SCHEMA)
+
+
+_SWAGGER_HTML = """<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sayta API — Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    SwaggerUIBundle({
+      url: "/api/schema/",
+      dom_id: "#swagger-ui",
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+      layout: "BaseLayout",
+      deepLinking: true,
+      tryItOutEnabled: true,
+    });
+  </script>
+</body>
+</html>"""
+
+
+def swagger_ui_view(request: HttpRequest):
+    return HttpResponse(_SWAGGER_HTML, content_type="text/html")
 
 
 def recordings_by_community_view(request: HttpRequest, community: str):
