@@ -721,9 +721,11 @@ def session_etiquetar_view(request: HttpRequest, community: str, session: str):
     txt_path.write_text(etiqueta, encoding="utf-8")
     return JsonResponse({
         "mensaje": "Etiqueta creada.",
+        "audio_origen": str(audio_path),
         "audio": nombre_audio,
         "etiqueta": etiqueta,
         "archivo_txt": txt_path.name,
+        "ruta_guardado": str(txt_path),
     }, status=201)
 
 
