@@ -135,7 +135,7 @@ def _scan_audios_sin_procesar(session_dir: Path) -> Dict:
     seconds = 0.0
     sin_meta = 0
     etiquetados = 0
-    for f in sorted(folder.iterdir()):
+    for f in sorted(folder.iterdir(), key=_natural_sort_key):
         if not f.is_file() or f.suffix.lower() not in AUDIO_EXTENSIONS:
             continue
         total += 1
@@ -156,6 +156,11 @@ def _scan_audios_sin_procesar(session_dir: Path) -> Dict:
         "sin_etiquetar": sin_etiquetar,
         "porcentaje_completado": round(etiquetados / total * 100, 1) if total > 0 else 0.0,
     }
+
+
+def _natural_sort_key(path: Path) -> List:
+    parts = re.split(r"(\d+)", path.name.lower())
+    return [int(p) if p.isdigit() else p for p in parts]
 
 
 def _parse_session_name(name: str) -> Dict:
@@ -625,7 +630,8 @@ def session_audios_view(request: HttpRequest, community: str, session: str):
     procesados_folder = session_dir / "audios_procesados"
 
     audios = []
-    for f in sorted(audios_folder.iterdir()) if audios_folder.exists() else []:
+    files = sorted(audios_folder.iterdir(), key=_natural_sort_key) if audios_folder.exists() else []
+    for f in files:
         if not f.is_file() or f.suffix.lower() not in AUDIO_EXTENSIONS:
             continue
         d = _audio_duration_seconds(f)
@@ -639,10 +645,23 @@ def session_audios_view(request: HttpRequest, community: str, session: str):
             "etiquetado": txt_path.exists(),
         })
 
+    total_etiquetados = sum(1 for a in audios if a["etiquetado"])
+    total_sin_etiquetar = len(audios) - total_etiquetados
+    total_segundos = sum(a["duracion_segundos"] for a in audios if a["duracion_segundos"])
+
     return JsonResponse({
         "comunidad": community,
         "jornada": session,
-        "total_audios": len(audios),
+        "resumen": {
+            "total_audios": len(audios),
+            "duracion_formateada": _format_duration(total_segundos),
+            "duracion_segundos": round(total_segundos, 2),
+            "etiquetados": total_etiquetados,
+            "sin_etiquetar": total_sin_etiquetar,
+            "porcentaje_completado": round(
+                total_etiquetados / len(audios) * 100, 1
+            ) if audios else 0.0,
+        },
         "audios": audios,
     })
 
@@ -782,7 +801,7 @@ def session_estado_view(request: HttpRequest, community: str, session: str):
     etiquetados = []
     sin_etiquetar = []
 
-    for f in sorted(audios_folder.iterdir()) if audios_folder.exists() else []:
+    for f in sorted(audios_folder.iterdir(), key=_natural_sort_key) if audios_folder.exists() else []:
         if not f.is_file() or f.suffix.lower() not in AUDIO_EXTENSIONS:
             continue
         txt_path = procesados_folder / f"{f.stem}.txt"
