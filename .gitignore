@@ -3,9 +3,32 @@ venv/
 .env
 *.pyc
 __pycache__/
+
+# Datasets y modelos generados
 Data_set_2/*
 Data_set/*
-modelo_guardado/*requirements.txt.bak
+modelo_guardado/*
+requirements.txt.bak
 
 ./images/*
 /images
+
+# Artefactos de embeddings FAISS — archivos grandes, se generan en el servidor
+*.npy
+*.bin
+
+# Archivos temporales de Office / LibreOffice
+~$*
+
+# Archivos Excel del diccionario fuente
+*.xlsx
+*.xls
+
+# Base de datos SQLite local de desarrollo
+db.sqlite3
+
+# Almacenamiento local de embeddings generados desde BD
+embeddings_storage/
+
+# Colección de modelos HuggingFace descargados
+models/

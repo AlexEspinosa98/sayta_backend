@@ -1,3 +1,4 @@
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from .models import EmbeddingVersion, Lengua, TerminoEs, TerminoLeng
@@ -21,9 +22,11 @@ class LenguaSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
+    @extend_schema_field(serializers.IntegerField())
     def get_total_terminos(self, obj):
         return obj.terminos.filter(activo=True).count()
 
+    @extend_schema_field(serializers.DictField(allow_null=True))
     def get_embedding_activo(self, obj):
         ev = obj.get_active_embedding()
         if ev:
@@ -50,6 +53,7 @@ class TerminoEsSerializer(serializers.ModelSerializer):
         fields = ['id', 'termino', 'traducciones_count', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
+    @extend_schema_field(serializers.IntegerField())
     def get_traducciones_count(self, obj):
         return obj.traducciones.filter(activo=True).count()
 
@@ -75,6 +79,7 @@ class TerminoLengSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
+    @extend_schema_field(serializers.DictField(allow_null=True))
     def get_termino_es_detail(self, obj):
         if obj.termino_es:
             return {'id': obj.termino_es.id, 'termino': obj.termino_es.termino}
@@ -156,3 +161,40 @@ class GenerarEmbeddingSerializer(serializers.Serializer):
         default='intfloat/multilingual-e5-base',
         max_length=255,
     )
+
+
+class TerminoItemSerializer(serializers.Serializer):
+    """Un ítem dentro de la carga masiva."""
+
+    termino = serializers.CharField(max_length=255)
+    definicion = serializers.CharField(required=False, default='', allow_blank=True)
+    pos = serializers.CharField(required=False, default='', allow_blank=True, max_length=50)
+    sinonimos = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    ejemplos = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    tipo_morfema = serializers.CharField(required=False, allow_null=True, default=None, max_length=50)
+    termino_es = serializers.CharField(required=False, allow_null=True, default=None, max_length=255,
+                                       help_text='Texto en español; se crea automáticamente si no existe.')
+    activo = serializers.BooleanField(required=False, default=True)
+
+
+class CargaMasivaSerializer(serializers.Serializer):
+    """Payload para carga masiva de términos (JSON body)."""
+
+    lengua_id = serializers.IntegerField(help_text='ID de la lengua destino.')
+    modo = serializers.ChoiceField(
+        choices=['upsert', 'crear', 'actualizar'],
+        default='upsert',
+        help_text='upsert: crea y actualiza | crear: solo nuevos | actualizar: solo existentes',
+    )
+    terminos = TerminoItemSerializer(many=True)
+
+
+class CargaMasivaResponseSerializer(serializers.Serializer):
+    """Respuesta de carga masiva."""
+
+    total = serializers.IntegerField()
+    creados = serializers.IntegerField()
+    actualizados = serializers.IntegerField()
+    sin_cambios = serializers.IntegerField()
+    errores = serializers.IntegerField()
+    detalle_errores = serializers.ListField(child=serializers.DictField())

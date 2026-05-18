@@ -152,10 +152,6 @@ class EmbeddingService:
 
     def _run_generation(self, embedding_version_id: str) -> None:
         """Ejecuta la generación de embeddings en un hilo separado."""
-        # Necesario para acceso a ORM desde un hilo
-        import django
-        django.setup()
-
         from terminos.models import EmbeddingVersion, TerminoLeng
 
         ev = None

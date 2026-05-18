@@ -6,6 +6,7 @@ psycopg2-binary==2.9.12
 # REST API
 djangorestframework==3.17.1
 django-filter==25.2
+drf-spectacular==0.29.0
 
 # NLP / Embeddings
 sentence-transformers==5.2.3

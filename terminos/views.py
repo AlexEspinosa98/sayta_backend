@@ -24,6 +24,7 @@ import logging
 from django.db import transaction
 from django.db.models import Q
 from django_filters.rest_framework import DjangoFilterBackend
+from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema, extend_schema_view
 from rest_framework import filters, mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
@@ -32,6 +33,8 @@ from rest_framework.response import Response
 
 from .models import EmbeddingVersion, Lengua, TerminoEs, TerminoLeng
 from .serializers import (
+    CargaMasivaResponseSerializer,
+    CargaMasivaSerializer,
     EmbeddingVersionSerializer,
     GenerarEmbeddingSerializer,
     LenguaSerializer,
@@ -60,18 +63,33 @@ class StandardPagination(PageNumberPagination):
 # ---------------------------------------------------------------------------
 
 
+@extend_schema_view(
+    list=extend_schema(
+        tags=['Lenguas'],
+        summary='Listar lenguas indígenas',
+        description='Retorna todas las lenguas registradas con total de términos activos y embedding activo.',
+        parameters=[
+            OpenApiParameter('search', str, description='Buscar por nombre, código o descripción'),
+            OpenApiParameter('ordering', str, description='Ordenar por: nombre, codigo, created_at'),
+        ],
+    ),
+    create=extend_schema(
+        tags=['Lenguas'],
+        summary='Crear lengua indígena',
+        examples=[
+            OpenApiExample(
+                'Ejemplo: Ette Taara',
+                value={'codigo': 'ette', 'nombre': 'Ette Taara', 'descripcion': 'Lengua del pueblo Chimila'},
+                request_only=True,
+            )
+        ],
+    ),
+    retrieve=extend_schema(tags=['Lenguas'], summary='Detalle de una lengua'),
+    update=extend_schema(tags=['Lenguas'], summary='Actualizar lengua completa'),
+    partial_update=extend_schema(tags=['Lenguas'], summary='Actualizar campos de una lengua'),
+    destroy=extend_schema(tags=['Lenguas'], summary='Eliminar lengua'),
+)
 class LenguaViewSet(viewsets.ModelViewSet):
-    """
-    CRUD de lenguas indígenas.
-
-    list:   GET  /api/terminos/lenguas/
-    create: POST /api/terminos/lenguas/
-    retrieve: GET /api/terminos/lenguas/{id}/
-    update: PUT  /api/terminos/lenguas/{id}/
-    partial_update: PATCH /api/terminos/lenguas/{id}/
-    destroy: DELETE /api/terminos/lenguas/{id}/
-    """
-
     queryset = Lengua.objects.all()
     serializer_class = LenguaSerializer
     pagination_class = StandardPagination
@@ -86,13 +104,27 @@ class LenguaViewSet(viewsets.ModelViewSet):
 # ---------------------------------------------------------------------------
 
 
+@extend_schema_view(
+    list=extend_schema(
+        tags=['Términos ES'],
+        summary='Listar términos en español',
+        parameters=[
+            OpenApiParameter('search', str, description='Buscar por texto del término'),
+        ],
+    ),
+    create=extend_schema(
+        tags=['Términos ES'],
+        summary='Crear término en español',
+        examples=[
+            OpenApiExample('Ejemplo', value={'termino': 'agua'}, request_only=True)
+        ],
+    ),
+    retrieve=extend_schema(tags=['Términos ES'], summary='Detalle de un término en español'),
+    update=extend_schema(tags=['Términos ES'], summary='Actualizar término en español'),
+    partial_update=extend_schema(tags=['Términos ES'], summary='Actualizar parcialmente'),
+    destroy=extend_schema(tags=['Términos ES'], summary='Eliminar término en español'),
+)
 class TerminoEsViewSet(viewsets.ModelViewSet):
-    """
-    CRUD de términos en español.
-
-    Incluye búsqueda por texto en el campo `termino`.
-    """
-
     queryset = TerminoEs.objects.all()
     serializer_class = TerminoEsSerializer
     pagination_class = StandardPagination
@@ -107,18 +139,53 @@ class TerminoEsViewSet(viewsets.ModelViewSet):
 # ---------------------------------------------------------------------------
 
 
+@extend_schema_view(
+    list=extend_schema(
+        tags=['Términos Lengua'],
+        summary='Listar términos en lengua indígena (paginado)',
+        parameters=[
+            OpenApiParameter('lengua', int, description='Filtrar por id de lengua'),
+            OpenApiParameter('activo', bool, description='true = solo activos, false = solo inactivos'),
+            OpenApiParameter('pos', str, description='Filtrar por parte del discurso (NOM, VRB, ADJ…)'),
+            OpenApiParameter('search', str, description='Buscar en termino y definicion'),
+            OpenApiParameter('termino_es_texto', str, description='Buscar por texto del término en español vinculado'),
+            OpenApiParameter('ordering', str, description='Ordenar por: termino, created_at, updated_at'),
+            OpenApiParameter('page', int, description='Número de página'),
+            OpenApiParameter('page_size', int, description='Resultados por página (máx 200)'),
+        ],
+    ),
+    create=extend_schema(
+        tags=['Términos Lengua'],
+        summary='Crear término en lengua indígena',
+        examples=[
+            OpenApiExample(
+                'Ejemplo completo',
+                value={
+                    'termino': 'aabasu',
+                    'lengua': 1,
+                    'termino_es': None,
+                    'definicion': 'nombre de hombre',
+                    'pos': 'NOM_PR',
+                    'sinonimos': [],
+                    'ejemplos': ['aabasu naka mutu'],
+                    'tipo_morfema': None,
+                    'activo': True,
+                },
+                request_only=True,
+            )
+        ],
+    ),
+    retrieve=extend_schema(tags=['Términos Lengua'], summary='Detalle de un término'),
+    update=extend_schema(tags=['Términos Lengua'], summary='Actualizar término completo'),
+    partial_update=extend_schema(tags=['Términos Lengua'], summary='Actualizar campos del término'),
+    destroy=extend_schema(
+        tags=['Términos Lengua'],
+        summary='Desactivar término (soft delete)',
+        description='No elimina el registro. Pone `activo = false`. Usar `/restaurar/` para reactivar.',
+    ),
+)
 class TerminoLengViewSet(viewsets.ModelViewSet):
-    """
-    CRUD completo de términos en lengua indígena con paginación y filtros.
-
-    Filtros disponibles (query params):
-      ?lengua=<id>           — filtrar por lengua
-      ?activo=true|false     — filtrar por estado activo
-      ?search=<texto>        — busca en termino y definicion
-      ?ordering=termino      — ordena por campo
-
-    Ejemplo: GET /api/terminos/terminos/?lengua=1&activo=true&search=agua
-    """
+    """CRUD completo de términos en lengua indígena con paginación y filtros."""
 
     queryset = (
         TerminoLeng.objects.select_related('lengua', 'termino_es').all()
@@ -148,14 +215,57 @@ class TerminoLengViewSet(viewsets.ModelViewSet):
         instance.activo = False
         instance.save(update_fields=['activo'])
 
+    @extend_schema(
+        tags=['Términos Lengua'],
+        summary='Restaurar término desactivado',
+        description='Reactiva un término que fue desactivado con DELETE. Pone `activo = true`.',
+        responses={200: TerminoLengSerializer},
+    )
     @action(detail=True, methods=['post'], url_path='restaurar')
     def restaurar(self, request, pk=None):
-        """POST /api/terminos/terminos/{id}/restaurar/ — reactiva un término inactivo."""
         termino = self.get_object()
         termino.activo = True
         termino.save(update_fields=['activo'])
         return Response(TerminoLengSerializer(termino).data)
 
+    @extend_schema(
+        tags=['Términos Lengua'],
+        summary='Carga masiva de términos desde JSON',
+        description=(
+            'Carga cientos o miles de términos en una sola llamada.\n\n'
+            '**Opción A — JSON body:**\n'
+            '```json\n'
+            '{"lengua_id": 1, "modo": "upsert", "terminos": [{...}]}\n'
+            '```\n\n'
+            '**Opción B — Archivo .json (multipart/form-data):**\n'
+            'Campos: `archivo` (archivo .json), `lengua_id` (int), `modo` (string opcional).\n\n'
+            '**Modos:** `upsert` (default) | `crear` | `actualizar`\n\n'
+            'Los errores por fila no cancelan el resto de la operación.'
+        ),
+        request=CargaMasivaSerializer,
+        responses={
+            200: CargaMasivaResponseSerializer,
+            207: CargaMasivaResponseSerializer,
+            400: OpenApiResponse(description='Parámetros inválidos'),
+            404: OpenApiResponse(description='Lengua no encontrada'),
+        },
+        examples=[
+            OpenApiExample(
+                'Respuesta exitosa',
+                value={
+                    'total': 3600,
+                    'creados': 3200,
+                    'actualizados': 350,
+                    'sin_cambios': 40,
+                    'errores': 10,
+                    'detalle_errores': [
+                        {'indice': 5, 'termino': 'xxx', 'error': 'El campo termino es obligatorio.'}
+                    ],
+                },
+                response_only=True,
+            )
+        ],
+    )
     @action(
         detail=False,
         methods=['post'],
@@ -376,20 +486,28 @@ class TerminoLengViewSet(viewsets.ModelViewSet):
 # ---------------------------------------------------------------------------
 
 
+@extend_schema_view(
+    list=extend_schema(
+        tags=['Embeddings'],
+        summary='Listar versiones de embeddings',
+        description='Historial de todas las versiones por lengua. Filtrar con `?lengua=1&status=ready`.',
+        parameters=[
+            OpenApiParameter('lengua', int, description='Filtrar por id de lengua'),
+            OpenApiParameter('status', str, description='pending | generating | ready | active | failed'),
+            OpenApiParameter('is_active', bool, description='true = solo la versión activa'),
+        ],
+    ),
+    retrieve=extend_schema(
+        tags=['Embeddings'],
+        summary='Detalle de una versión de embedding',
+    ),
+)
 class EmbeddingVersionViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     viewsets.GenericViewSet,
 ):
-    """
-    Gestión de versiones de embeddings.
-
-    list:     GET  /api/terminos/embeddings/
-    retrieve: GET  /api/terminos/embeddings/{id}/
-    generar:  POST /api/terminos/embeddings/generar/
-    activar:  POST /api/terminos/embeddings/{id}/activar/
-    estado:   GET  /api/terminos/embeddings/estado/{task_id}/
-    """
+    """Gestión de versiones de embeddings por lengua."""
 
     queryset = EmbeddingVersion.objects.select_related('lengua').all()
     serializer_class = EmbeddingVersionSerializer
@@ -399,6 +517,38 @@ class EmbeddingVersionViewSet(
     ordering_fields = ['created_at', 'completed_at', 'num_terminos']
     ordering = ['-created_at']
 
+    @extend_schema(
+        tags=['Embeddings'],
+        summary='Generar embeddings para una lengua (async)',
+        description=(
+            'Dispara la generación de embeddings en segundo plano. '
+            'Retorna inmediatamente con un `task_id`. '
+            'Consultar el estado con `GET /api/terminos/embeddings/estado/{task_id}/`.'
+        ),
+        request=GenerarEmbeddingSerializer,
+        responses={
+            202: OpenApiResponse(description='Generación iniciada', response=EmbeddingVersionSerializer),
+            409: OpenApiResponse(description='Ya hay una generación en curso para esta lengua'),
+            404: OpenApiResponse(description='Lengua no encontrada'),
+        },
+        examples=[
+            OpenApiExample(
+                'Body',
+                value={'lengua_id': 1, 'model_name': 'intfloat/multilingual-e5-base'},
+                request_only=True,
+            ),
+            OpenApiExample(
+                'Respuesta 202',
+                value={
+                    'message': 'Generación iniciada en segundo plano.',
+                    'task_id': '550e8400-e29b-41d4-a716-446655440000',
+                    'embedding_version_id': '7f3e4c2a-1b5d-4a8e-9c3f-2d6b8e1a4f7c',
+                },
+                response_only=True,
+                status_codes=['202'],
+            ),
+        ],
+    )
     @action(detail=False, methods=['post'], url_path='generar')
     def generar(self, request):
         """
@@ -451,6 +601,20 @@ class EmbeddingVersionViewSet(
             status=status.HTTP_202_ACCEPTED,
         )
 
+    @extend_schema(
+        tags=['Embeddings'],
+        summary='Activar versión de embedding',
+        description=(
+            'Activa esta versión y desactiva la anterior para la misma lengua. '
+            'El motor de búsqueda se recarga en caliente sin reiniciar el servidor. '
+            'Solo se puede activar si el estado es `ready` o `active`.'
+        ),
+        responses={
+            200: EmbeddingVersionSerializer,
+            400: OpenApiResponse(description='Estado inválido para activar'),
+            404: OpenApiResponse(description='Versión no encontrada'),
+        },
+    )
     @action(detail=True, methods=['post'], url_path='activar')
     def activar(self, request, pk=None):
         """
@@ -469,6 +633,21 @@ class EmbeddingVersionViewSet(
 
         return Response(EmbeddingVersionSerializer(ev).data)
 
+    @extend_schema(
+        tags=['Embeddings'],
+        summary='Consultar estado de generación',
+        description=(
+            'Polling del estado de una tarea de generación de embeddings. '
+            'Estados: `pending` → `generating` → `ready` (o `failed`).'
+        ),
+        parameters=[
+            OpenApiParameter('task_id', str, location=OpenApiParameter.PATH, description='UUID del task_id retornado por /generar/'),
+        ],
+        responses={
+            200: EmbeddingVersionSerializer,
+            404: OpenApiResponse(description='task_id no encontrado'),
+        },
+    )
     @action(detail=False, methods=['get'], url_path='estado/(?P<task_id>[^/.]+)')
     def estado(self, request, task_id=None):
         """

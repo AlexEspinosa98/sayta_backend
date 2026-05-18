@@ -6,7 +6,10 @@
       "Bash(venv/bin/python manage.py makemigrations terminos)",
       "Bash(venv/bin/pip freeze *)",
       "Bash(venv/bin/python -c ' *)",
-      "Bash(venv/bin/python manage.py check)"
+      "Bash(venv/bin/python manage.py check)",
+      "Bash(xargs du -sh)",
+      "Bash(grep -E \"\\\\.\\(npy|bin|xlsx\\)$\")",
+      "Bash(git rm *)"
     ],
     "additionalDirectories": [
       "/Users/alex_espinosa/Documents/New_order/Unimagdalena/traductor/backend"

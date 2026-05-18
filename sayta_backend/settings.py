@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     # Terceros
     'rest_framework',
     'django_filters',
+    'drf_spectacular',
     # Propias
     'health',
     'translator_api',
@@ -105,6 +106,30 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PARSER_CLASSES': [
         'rest_framework.parsers.JSONParser',
+    ],
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Sayta — API de Términos y Embeddings',
+    'DESCRIPTION': (
+        'API REST para gestionar diccionarios de lenguas indígenas colombianas.\n\n'
+        '**Flujo recomendado:**\n'
+        '1. Crear lengua → `POST /api/terminos/lenguas/`\n'
+        '2. Cargar términos → `POST /api/terminos/terminos/carga-masiva/`\n'
+        '3. Generar embeddings → `POST /api/terminos/embeddings/generar/`\n'
+        '4. Monitorear → `GET /api/terminos/embeddings/estado/{task_id}/`\n'
+        '5. Activar → `POST /api/terminos/embeddings/{id}/activar/`\n'
+    ),
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'COMPONENT_SPLIT_REQUEST': True,
+    'SORT_OPERATIONS': False,
+    'TAGS': [
+        {'name': 'Lenguas', 'description': 'Gestión de lenguas indígenas registradas'},
+        {'name': 'Términos ES', 'description': 'Términos en español (entradas del diccionario)'},
+        {'name': 'Términos Lengua', 'description': 'Términos en lengua indígena con definición'},
+        {'name': 'Embeddings', 'description': 'Generación, activación y monitoreo de embeddings por lengua'},
     ],
 }
 
