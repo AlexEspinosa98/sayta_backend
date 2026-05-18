@@ -1,0 +1,13 @@
+# Core
+Django==5.2.11
+psycopg2-binary==2.9.12
+
+# REST API
+djangorestframework==3.17.1
+django-filter==25.2
+
+# NLP / Embeddings
+sentence-transformers==5.2.3
+faiss-cpu==1.13.2
+numpy==2.4.2
+torch==2.10.0

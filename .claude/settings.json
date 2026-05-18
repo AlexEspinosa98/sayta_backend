@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(venv/bin/pip list *)",
+      "Bash(venv/bin/pip install *)",
+      "Bash(venv/bin/python manage.py makemigrations terminos)",
+      "Bash(venv/bin/pip freeze *)",
+      "Bash(venv/bin/python -c ' *)",
+      "Bash(venv/bin/python manage.py check)"
+    ],
+    "additionalDirectories": [
+      "/Users/alex_espinosa/Documents/New_order/Unimagdalena/traductor/backend"
+    ]
+  }
+}
