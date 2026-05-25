@@ -9,7 +9,11 @@
       "Bash(venv/bin/python manage.py check)",
       "Bash(xargs du -sh)",
       "Bash(grep -E \"\\\\.\\(npy|bin|xlsx\\)$\")",
-      "Bash(git rm *)"
+      "Bash(git rm *)",
+      "Bash(venv/bin/python manage.py spectacular --validate --fail-on-warn)",
+      "Bash(venv/bin/python manage.py spectacular --validate)",
+      "Bash(git commit -m ' *)",
+      "Bash(venv/bin/python manage.py show_urls)"
     ],
     "additionalDirectories": [
       "/Users/alex_espinosa/Documents/New_order/Unimagdalena/traductor/backend"
