@@ -87,6 +87,7 @@ class SingleLanguageEngine:
             entry = self._metadata[idx]
             results.append({
                 'lemma': entry.get('lemma'),
+                'termino_es': entry.get('termino_es', ''),
                 'definicion': entry.get('definicion'),
                 'pos': entry.get('pos'),
                 'sinonimos': entry.get('sinonimos', []),

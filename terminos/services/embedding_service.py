@@ -162,7 +162,10 @@ class EmbeddingService:
 
             terminos_qs = TerminoLeng.objects.filter(
                 lengua=ev.lengua, activo=True
-            ).values('termino', 'definicion', 'pos', 'sinonimos', 'ejemplos', 'tipo_morfema')
+            ).select_related('termino_es').values(
+                'termino', 'definicion', 'pos', 'sinonimos', 'ejemplos',
+                'tipo_morfema', 'termino_es__termino',
+            )
 
             terminos = list(terminos_qs)
 
@@ -222,6 +225,7 @@ class EmbeddingService:
             corpus.append(texto)
             metadata.append({
                 'lemma': t['termino'],
+                'termino_es': t.get('termino_es__termino') or '',
                 'definicion': t['definicion'],
                 'pos': t['pos'],
                 'sinonimos': t['sinonimos'],

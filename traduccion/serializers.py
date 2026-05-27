@@ -18,9 +18,14 @@ class TraducirRequestSerializer(serializers.Serializer):
 
 
 class ResultadoTraduccionSerializer(serializers.Serializer):
-    termino = serializers.CharField(allow_null=True)
-    definicion = serializers.CharField(allow_blank=True)
-    score = serializers.FloatField(allow_null=True, help_text='Similitud coseno (0-1).')
+    termino = serializers.CharField(allow_null=True, help_text='Término en la lengua indígena.')
+    termino_es = serializers.CharField(allow_blank=True, help_text='Equivalente en español.')
+    definicion = serializers.CharField(allow_blank=True, help_text='Definición en español.')
+    score = serializers.FloatField(allow_null=True, help_text='Similitud coseno (0–1). Mayor = más cercano.')
+    coincidencia = serializers.CharField(
+        allow_blank=True,
+        help_text='Sub-consulta que produjo este resultado (útil para debug multi-palabra).',
+    )
 
 
 class EmbeddingInfoSerializer(serializers.Serializer):

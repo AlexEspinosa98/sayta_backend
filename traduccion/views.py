@@ -7,9 +7,9 @@ Endpoint:
 
 Flujo:
   1. Resuelve la Lengua y su EmbeddingVersion activa.
-  2. Usa la dirección enviada por el cliente para etiquetar la respuesta.
-  3. Busca los 3 términos más cercanos en el índice FAISS de esa lengua.
-  4. Devuelve termino + definicion + score para cada resultado.
+  2. Ejecuta el pipeline multi-estrategia (frase completa → n-gramas → tokens).
+  3. Enriquece resultados con termino_es desde BD si el metadata no lo tiene.
+  4. Devuelve los 3 términos más cercanos con termino, termino_es, definicion y score.
 """
 
 import logging
@@ -19,6 +19,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .pipeline import TranslationPipeline
 from .serializers import TraducirRequestSerializer, TraducirResponseSerializer
 
 logger = logging.getLogger(__name__)
@@ -34,16 +35,22 @@ class TraducirView(APIView):
 
     @extend_schema(
         tags=['Traducción'],
-        summary='Traducir texto usando embeddings semánticos',
+        summary='Traducir texto usando embeddings semánticos (multi-palabra)',
         description=(
             'Recibe un texto, el ID de la lengua indígena y la **dirección** de traducción.\n\n'
-            '- `es_a_lengua`: el texto está en español → se busca el equivalente en la lengua indígena.\n'
-            '- `lengua_a_es`: el texto está en la lengua indígena → se busca su equivalente en español.\n\n'
-            'Retorna los **3 términos más cercanos** del glosario con su definición '
-            'y un score de similitud coseno (0–1).\n\n'
-            '**Requisito:** la lengua debe tener un embedding en estado `active`. '
-            'Generarlo con `POST /api/terminos/embeddings/generar/` y activarlo con '
-            '`POST /api/terminos/embeddings/{id}/activar/`.'
+            '**Dirección:**\n'
+            '- `es_a_lengua` → texto en español, busca términos en la lengua indígena.\n'
+            '- `lengua_a_es` → texto en lengua indígena, busca su equivalente en español.\n\n'
+            '**Análisis multi-estrategia:** el pipeline ejecuta tres niveles de búsqueda '
+            'para cubrir tanto palabras simples como frases compuestas del glosario:\n'
+            '1. **Frase completa** — busca el texto tal como llega (peso 1.0).\n'
+            '2. **N-gramas** — prueba todas las combinaciones de bi y tri-gramas (peso 0.92).\n'
+            '3. **Tokens individuales** — busca cada palabra por separado (peso 0.80).\n\n'
+            'Los resultados de los tres niveles se fusionan por término y se retornan '
+            'los **3 más cercanos** ordenados por score.\n\n'
+            'Cada resultado incluye `termino` (lengua indígena), `termino_es` (español), '
+            '`definicion` y `coincidencia` (sub-consulta que lo encontró).\n\n'
+            '**Requisito:** la lengua debe tener un embedding en estado `active`.'
         ),
         request=TraducirRequestSerializer,
         responses={
@@ -55,31 +62,49 @@ class TraducirView(APIView):
         },
         examples=[
             OpenApiExample(
-                'Español → Arhuaco',
-                value={'texto': 'agua', 'lengua_id': 1, 'direccion': 'es_a_lengua'},
+                'Palabra simple — Español → Arhuaco',
+                value={'texto': 'jaguar', 'lengua_id': 1, 'direccion': 'es_a_lengua'},
                 request_only=True,
             ),
             OpenApiExample(
-                'Arhuaco → Español',
-                value={'texto': 'zaku', 'lengua_id': 1, 'direccion': 'lengua_a_es'},
+                'Frase compuesta — Arhuaco → Español',
+                value={'texto': 'Du zari bunsi chano', 'lengua_id': 1, 'direccion': 'lengua_a_es'},
                 request_only=True,
             ),
             OpenApiExample(
                 'Respuesta exitosa',
                 value={
-                    'texto_entrada': 'agua',
+                    'texto_entrada': 'Du zari bunsi chano',
                     'lengua': {'id': 1, 'codigo': 'iku', 'nombre': 'Arhuaco'},
                     'embedding': {
                         'version_id': '7f3e4c2a-1b5d-4a8e-9c3f-2d6b8e1a4f7c',
-                        'version': '20241201_123456',
+                        'version': '20260527_100000',
                         'modelo': 'intfloat/multilingual-e5-base',
-                        'num_terminos': 3600,
+                        'num_terminos': 197,
                     },
-                    'direccion': 'es→iku',
+                    'direccion': 'iku→es',
                     'resultados': [
-                        {'termino': 'zaku', 'definicion': 'agua del río', 'score': 0.9231},
-                        {'termino': 'zaku naka', 'definicion': 'corriente de agua', 'score': 0.8912},
-                        {'termino': 'amu', 'definicion': 'lluvia, agua del cielo', 'score': 0.8745},
+                        {
+                            'termino': 'Du zari bunsi chano',
+                            'termino_es': 'buenos días',
+                            'definicion': 'Saludo de la mañana en lengua ikʉn.',
+                            'score': 0.9801,
+                            'coincidencia': 'Du zari bunsi chano',
+                        },
+                        {
+                            'termino': 'Du zari ɉwi nayo',
+                            'termino_es': 'buenas tardes',
+                            'definicion': 'Saludo de la tarde en lengua ikʉn.',
+                            'score': 0.8740,
+                            'coincidencia': 'Du zari',
+                        },
+                        {
+                            'termino': 'Bunachʉn',
+                            'termino_es': 'español',
+                            'definicion': 'Nombre del español o castellano en lengua ikʉn.',
+                            'score': 0.7120,
+                            'coincidencia': 'chano',
+                        },
                     ],
                 },
                 response_only=True,
@@ -123,25 +148,20 @@ class TraducirView(APIView):
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
 
-        # --- Búsqueda semántica ---
+        # --- Pipeline multi-estrategia ---
         try:
             from translator_api.search_engine import MultiLanguageSearchEngine
             engine = MultiLanguageSearchEngine.get_instance()
-            hits = engine.search(texto, language_code=lengua.codigo, top_k=3)
+            pipeline = TranslationPipeline(engine, language_code=lengua.codigo)
+            resultados = pipeline.translate(texto, top_k=3)
         except ValueError as exc:
             return Response({'error': str(exc)}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
         except Exception as exc:
-            logger.error('Error en búsqueda semántica: %s', exc, exc_info=True)
-            return Response({'error': f'Error interno: {exc}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        resultados = [
-            {
-                'termino': h.get('lemma'),
-                'definicion': h.get('definicion') or '',
-                'score': round(h['score'], 4) if h.get('score') is not None else None,
-            }
-            for h in hits
-        ]
+            logger.error('Error en pipeline de traducción: %s', exc, exc_info=True)
+            return Response(
+                {'error': f'Error interno en traducción: {exc}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
         data = {
             'texto_entrada': texto,
@@ -171,7 +191,7 @@ class TraducirView(APIView):
             'descripcion': 'Envía texto, lengua_id y direccion vía POST.',
             'direcciones_disponibles': {
                 'es_a_lengua': 'texto en español → busca en la lengua indígena',
-                'lengua_a_es': 'texto en lengua indígena → busca equivalente en español',
+                'lengua_a_es': 'texto en lengua indígena → busca su equivalente en español',
             },
-            'ejemplo': {'texto': 'agua', 'lengua_id': 1, 'direccion': 'es_a_lengua'},
+            'ejemplo': {'texto': 'Du zari bunsi chano', 'lengua_id': 1, 'direccion': 'lengua_a_es'},
         })
