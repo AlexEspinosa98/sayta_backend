@@ -200,6 +200,12 @@ class EmbeddingService:
         finally:
             with _tasks_lock:
                 _active_tasks.pop(ev.task_id if ev else '', None)
+            # Liberar la conexión DB del hilo; Django no lo hace automáticamente en threads
+            try:
+                from django.db import connection
+                connection.close()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Helpers privados
