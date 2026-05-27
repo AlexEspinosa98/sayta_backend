@@ -25,4 +25,5 @@ urlpatterns = [
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('api/', include('translator_api.urls')),
     path('api/terminos/', include('terminos.urls')),
+    path('api/traduccion/', include('traduccion.urls')),
 ]

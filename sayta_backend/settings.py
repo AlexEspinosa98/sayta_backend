@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'health',
     'translator_api',
     'terminos',
+    'traduccion',
 ]
 
 MIDDLEWARE = [
