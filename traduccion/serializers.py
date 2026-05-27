@@ -21,10 +21,16 @@ class ResultadoTraduccionSerializer(serializers.Serializer):
     termino = serializers.CharField(allow_null=True, help_text='Término en la lengua indígena.')
     termino_es = serializers.CharField(allow_blank=True, help_text='Equivalente en español.')
     definicion = serializers.CharField(allow_blank=True, help_text='Definición en español.')
-    score = serializers.FloatField(allow_null=True, help_text='Similitud coseno (0–1). Mayor = más cercano.')
+    score = serializers.FloatField(allow_null=True, help_text='Similitud coseno (0–1).')
+    probabilidad = serializers.FloatField(
+        help_text='Probabilidad relativa entre los resultados retornados (suma 100 %).'
+    )
+    mejor_coincidencia = serializers.BooleanField(
+        help_text='True en el resultado con mayor probabilidad (el que más sentido tiene).'
+    )
     coincidencia = serializers.CharField(
         allow_blank=True,
-        help_text='Sub-consulta que produjo este resultado (útil para debug multi-palabra).',
+        help_text='Sub-consulta que produjo este resultado (frase, bigrama o token).',
     )
 
 
@@ -41,11 +47,21 @@ class LenguaInfoSerializer(serializers.Serializer):
     nombre = serializers.CharField()
 
 
+class ConclusionSerializer(serializers.Serializer):
+    termino = serializers.CharField(help_text='Término en la lengua indígena con mayor probabilidad.')
+    termino_es = serializers.CharField(help_text='Equivalente en español.')
+    definicion = serializers.CharField(help_text='Definición en español.')
+    probabilidad = serializers.FloatField(help_text='Probabilidad relativa sobre los resultados retornados.')
+
+
 class TraducirResponseSerializer(serializers.Serializer):
     texto_entrada = serializers.CharField()
     lengua = LenguaInfoSerializer()
     embedding = EmbeddingInfoSerializer()
     direccion = serializers.CharField(
-        help_text='Dirección detectada automáticamente, p. ej. "es→iku" o "iku→es".'
+        help_text='Dirección de la traducción, p. ej. "es→iku" o "iku→es".'
+    )
+    conclusion = ConclusionSerializer(
+        help_text='Resultado con mayor probabilidad. Es la traducción más probable.'
     )
     resultados = ResultadoTraduccionSerializer(many=True)

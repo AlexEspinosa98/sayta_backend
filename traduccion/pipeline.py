@@ -47,6 +47,20 @@ def _build_ngrams(tokens: List[str], max_n: int = 3) -> List[str]:
     return ngrams
 
 
+def _calcular_probabilidades(results: List[Dict]) -> List[Dict]:
+    """
+    Convierte los scores coseno en probabilidades relativas (suman 100 %).
+    Marca el primer resultado como mejor_coincidencia.
+    """
+    if not results:
+        return results
+    total = sum(r['score'] for r in results)
+    for i, r in enumerate(results):
+        r['probabilidad'] = round((r['score'] / total) * 100, 1) if total > 0 else 0.0
+        r['mejor_coincidencia'] = (i == 0)
+    return results
+
+
 def _enrich_with_db(results: List[Dict], language_code: str) -> List[Dict]:
     """
     Rellena termino_es vacío consultando la BD por lemma.
@@ -113,7 +127,9 @@ class TranslationPipeline:
 
         # Enriquecer con termino_es desde BD si el metadata no lo tenía
         enriched = _enrich_with_db(ranked, self._language_code)
-        return enriched
+
+        # Calcular probabilidad relativa y marcar el mejor
+        return _calcular_probabilidades(enriched)
 
     # ------------------------------------------------------------------
     # Privado

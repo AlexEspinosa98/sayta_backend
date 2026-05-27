@@ -163,6 +163,14 @@ class TraducirView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
+        mejor = resultados[0] if resultados else None
+        conclusion = {
+            'termino': mejor['termino'],
+            'termino_es': mejor['termino_es'],
+            'definicion': mejor['definicion'],
+            'probabilidad': mejor['probabilidad'],
+        } if mejor else None
+
         data = {
             'texto_entrada': texto,
             'lengua': {
@@ -177,6 +185,7 @@ class TraducirView(APIView):
                 'num_terminos': embedding_activo.num_terminos,
             },
             'direccion': _formatear_direccion(direccion_input, lengua.codigo),
+            'conclusion': conclusion,
             'resultados': resultados,
         }
         return Response(TraducirResponseSerializer(data).data)
