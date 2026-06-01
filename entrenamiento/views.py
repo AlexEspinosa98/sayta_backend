@@ -35,6 +35,7 @@ from .serializers import (
     ModeloAudioSerializer,
     TranscribirRequestSerializer,
     TranscribirTraducirRequestSerializer,
+    SesionSerializer,
 )
 from .services import dataset_service, model_service, training_service
 
@@ -211,6 +212,87 @@ class DatasetComunidadView(APIView):
         return Response(stats)
 
 
+class DatasetSesionesView(APIView):
+    @extend_schema(
+        tags=['Entrenamiento — Dataset'],
+        summary='Lista plana de todas las jornadas disponibles (para selección granular)',
+        description=(
+            'Retorna TODAS las jornadas de TODAS las comunidades con sus conteos de audios '
+            'etiquetados. El frontend puede mostrar checkboxes individuales por jornada.\n\n'
+            'Usar `apta: true` para filtrar las que tienen al menos un audio etiquetado.'
+        ),
+        responses={200: OpenApiResponse(description='Lista plana de jornadas con estadísticas')},
+    )
+    def get(self, request):
+        data = dataset_service.get_all_sessions()
+        return Response(data)
+
+
+# ======================================================================
+# Lenguas con información de estado ASR
+# ======================================================================
+
+class LenguasEntrenamientoView(APIView):
+    @extend_schema(
+        tags=['Entrenamiento — Lenguas'],
+        summary='Lista de lenguas activas con estado de modelos ASR',
+        description=(
+            'Retorna las lenguas registradas en la base de datos con información '
+            'de si tienen un modelo ASR activo, cuántos modelos están descargados, '
+            'y el detalle del experimento activo (si existe).\n\n'
+            'Usar el `id` de esta respuesta como `lengua_id` en el endpoint de entrenamiento.'
+        ),
+        responses={200: OpenApiResponse(description='Lenguas activas con estado ASR')},
+    )
+    def get(self, request):
+        from terminos.models import Lengua
+
+        lenguas = Lengua.objects.filter(activa=True).order_by('nombre')
+        modelos_desc = ModeloAudio.objects.filter(descargado=True)
+
+        result = []
+        for lengua in lenguas:
+            exp_activo = (
+                ExperimentoEntrenamiento.objects
+                .filter(lengua=lengua, is_active=True)
+                .select_related('modelo_base')
+                .first()
+            )
+            ultimo_exp = (
+                ExperimentoEntrenamiento.objects
+                .filter(lengua=lengua)
+                .order_by('-created_at')
+                .select_related('modelo_base')
+                .first()
+            )
+            result.append({
+                'id': lengua.id,
+                'codigo': lengua.codigo,
+                'nombre': lengua.nombre,
+                'tiene_modelo_activo': exp_activo is not None,
+                'modelo_activo': {
+                    'experimento_id': str(exp_activo.id),
+                    'nombre': exp_activo.nombre,
+                    'modelo_hf': exp_activo.modelo_base.nombre_hf,
+                    'metricas': exp_activo.metricas,
+                    'completed_at': exp_activo.completed_at,
+                } if exp_activo else None,
+                'ultimo_experimento': {
+                    'id': str(ultimo_exp.id),
+                    'nombre': ultimo_exp.nombre,
+                    'estado': ultimo_exp.estado,
+                    'created_at': ultimo_exp.created_at,
+                } if ultimo_exp and not exp_activo else None,
+                'modelos_descargados': modelos_desc.count(),
+                'modelos_disponibles_para_entrenar': [
+                    {'id': m.id, 'nombre_hf': m.nombre_hf, 'tipo': m.tipo}
+                    for m in modelos_desc
+                ],
+            })
+
+        return Response({'total': len(result), 'lenguas': result})
+
+
 # ======================================================================
 # Entrenamiento
 # ======================================================================
@@ -223,6 +305,14 @@ class EntrenarView(APIView):
             'Dispara el entrenamiento en segundo plano. Retorna inmediatamente con el '
             '`id` del experimento. Monitorea el estado con '
             '`GET /api/entrenamiento/experimentos/{id}/estado/`.\n\n'
+            '**Obtener IDs necesarios:**\n'
+            '- `lengua_id` → `GET /api/entrenamiento/lenguas/`\n'
+            '- `modelo_audio_id` → `GET /api/entrenamiento/modelos/`\n\n'
+            '**Modos de selección de datos (elige uno):**\n'
+            '- `"todos": true` — usa TODOS los audios etiquetados del sistema\n'
+            '- `"sesiones": [{comunidad, jornada}, ...]` — jornadas específicas (granular)\n'
+            '- `"comunidades": ["arhuaco", ...]` — comunidades completas\n\n'
+            'Ver jornadas disponibles en `GET /api/entrenamiento/dataset/sesiones/`.\n\n'
             '**Config opcionales:**\n'
             '- `num_train_epochs` (int, default 20)\n'
             '- `learning_rate` (float, default 1e-4 para wav2vec2 / 1e-5 para whisper)\n'
@@ -232,30 +322,49 @@ class EntrenarView(APIView):
             '- `use_peft` (bool, default false) — LoRA para fine-tuning eficiente\n'
             '- `peft_r` (int, default 16)\n'
             '- `whisper_language` (str, default "es")\n'
-            '- `mlflow_tracking_uri` (str) — URI del servidor MLflow\n'
         ),
         request=EntrenarRequestSerializer,
         responses={
             202: OpenApiResponse(description='Entrenamiento iniciado (asíncrono)'),
             400: OpenApiResponse(description='Parámetros inválidos'),
             404: OpenApiResponse(description='Lengua o modelo no encontrados'),
+            409: OpenApiResponse(description='Ya hay un entrenamiento en curso'),
             422: OpenApiResponse(description='Datos insuficientes para entrenar'),
         },
         examples=[
             OpenApiExample(
-                'Fine-tuning Whisper Small — Arhuaco',
+                'Modo: todos los audios',
                 value={
-                    'nombre': 'whisper-small-iku-v1',
+                    'nombre': 'whisper-small-iku-v1-full',
                     'lengua_id': 1,
                     'modelo_audio_id': 1,
-                    'comunidades': ['arhuaco'],
-                    'config': {
-                        'num_train_epochs': 20,
-                        'learning_rate': 1e-5,
-                        'per_device_train_batch_size': 4,
-                        'use_peft': False,
-                        'whisper_language': 'es',
-                    },
+                    'todos': True,
+                    'config': {'num_train_epochs': 20, 'use_peft': False},
+                },
+                request_only=True,
+            ),
+            OpenApiExample(
+                'Modo: jornadas específicas',
+                value={
+                    'nombre': 'whisper-small-iku-fauna',
+                    'lengua_id': 1,
+                    'modelo_audio_id': 1,
+                    'sesiones': [
+                        {'comunidad': 'arhuaco', 'jornada': 'grabacion_15_03_26_fauna'},
+                        {'comunidad': 'arhuaco', 'jornada': 'grabacion_20_04_26_animales'},
+                    ],
+                    'config': {'num_train_epochs': 15},
+                },
+                request_only=True,
+            ),
+            OpenApiExample(
+                'Modo: comunidades completas',
+                value={
+                    'nombre': 'whisper-small-bilingue-v1',
+                    'lengua_id': 1,
+                    'modelo_audio_id': 1,
+                    'comunidades': ['arhuaco', 'kogui'],
+                    'config': {'num_train_epochs': 20, 'use_peft': True, 'peft_r': 16},
                 },
                 request_only=True,
             ),
@@ -310,8 +419,21 @@ class EntrenarView(APIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        # Construir dataset
-        samples = dataset_service.build_samples(data['comunidades'])
+        # ── Construir dataset según modo de selección ──────────────────
+        todos = data.get('todos', False)
+        sesiones = data.get('sesiones', [])
+        comunidades_sel = data.get('comunidades', [])
+
+        if todos:
+            samples = dataset_service.build_all_samples()
+            seleccion_info = {'modo': 'todos'}
+        elif sesiones:
+            samples = dataset_service.build_samples_from_sessions(sesiones)
+            seleccion_info = {'modo': 'sesiones', 'sesiones': sesiones}
+        else:
+            samples = dataset_service.build_samples_from_communities(comunidades_sel)
+            seleccion_info = {'modo': 'comunidades', 'comunidades': comunidades_sel}
+
         if len(samples) < dataset_service.MIN_MUESTRAS_ENTRENAMIENTO:
             return Response(
                 {
@@ -321,6 +443,7 @@ class EntrenarView(APIView):
                         'Etiqueta más audios antes de entrenar.'
                     ),
                     'muestras_encontradas': len(samples),
+                    'seleccion': seleccion_info,
                 },
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
@@ -330,7 +453,7 @@ class EntrenarView(APIView):
             nombre=data['nombre'],
             lengua=lengua,
             modelo_base=modelo_audio,
-            comunidades_usadas=data['comunidades'],
+            comunidades_usadas=seleccion_info,
             config_entrenamiento=data.get('config', {}),
             estado=ExperimentoEntrenamiento.ESTADO_PENDIENTE,
         )

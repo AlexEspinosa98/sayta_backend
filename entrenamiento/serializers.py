@@ -50,20 +50,74 @@ class ExperimentoDetailSerializer(serializers.ModelSerializer):
         ]
 
 
+class SesionSerializer(serializers.Serializer):
+    """Par (comunidad, jornada) para selección granular de datos."""
+    comunidad = serializers.CharField(
+        help_text='Nombre de la carpeta de comunidad (ej: "arhuaco")',
+    )
+    jornada = serializers.CharField(
+        help_text='Nombre de la sub-carpeta de jornada (ej: "grabacion_15_03_26_fauna")',
+    )
+
+
 class EntrenarRequestSerializer(serializers.Serializer):
     nombre = serializers.CharField(max_length=255)
-    lengua_id = serializers.IntegerField()
-    modelo_audio_id = serializers.IntegerField()
+    lengua_id = serializers.IntegerField(
+        help_text='ID de la Lengua en la base de datos (ver GET /api/entrenamiento/lenguas/)',
+    )
+    modelo_audio_id = serializers.IntegerField(
+        help_text='ID del ModeloAudio descargado (ver GET /api/entrenamiento/modelos/)',
+    )
+
+    # ── Selección de dataset — exactamente uno de estos tres debe estar presente ──
+    todos = serializers.BooleanField(
+        required=False,
+        default=False,
+        help_text='Si true, usa TODOS los audios etiquetados sin importar comunidad o jornada.',
+    )
+    sesiones = serializers.ListField(
+        child=SesionSerializer(),
+        required=False,
+        default=list,
+        help_text=(
+            'Jornadas específicas a incluir.\n'
+            'Ej: [{"comunidad": "arhuaco", "jornada": "grabacion_15_03_26_fauna"}]'
+        ),
+    )
     comunidades = serializers.ListField(
         child=serializers.CharField(),
-        min_length=1,
-        help_text='Nombres de carpetas de comunidades a usar (ej: ["arhuaco", "kogui"])',
+        required=False,
+        default=list,
+        help_text='Comunidades completas (todas sus jornadas). Ej: ["arhuaco", "kogui"]',
     )
+
     config = serializers.DictField(
         required=False,
         default=dict,
-        help_text='Hiperparámetros opcionales (num_train_epochs, learning_rate, use_peft, etc.)',
+        help_text=(
+            'Hiperparámetros opcionales:\n'
+            '  num_train_epochs (int, default 20)\n'
+            '  learning_rate (float)\n'
+            '  per_device_train_batch_size (int, default 4)\n'
+            '  gradient_accumulation_steps (int, default 2)\n'
+            '  warmup_steps (int, default 100)\n'
+            '  use_peft (bool, default false)\n'
+            '  peft_r (int, default 16)\n'
+            '  whisper_language (str, default "es")'
+        ),
     )
+
+    def validate(self, data):
+        todos = data.get('todos', False)
+        sesiones = data.get('sesiones', [])
+        comunidades = data.get('comunidades', [])
+
+        if not todos and not sesiones and not comunidades:
+            raise serializers.ValidationError(
+                'Debes especificar al menos uno: '
+                '"todos": true, "sesiones": [...], o "comunidades": [...]'
+            )
+        return data
 
 
 class TranscribirRequestSerializer(serializers.Serializer):

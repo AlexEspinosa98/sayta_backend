@@ -11,7 +11,6 @@ Estructura esperada en disco:
 """
 
 import logging
-import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -20,7 +19,6 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 AUDIO_EXTENSIONS = {'.wav', '.mp3', '.mp4', '.m4a', '.ogg', '.flac'}
-
 MIN_MUESTRAS_ENTRENAMIENTO = 5
 
 
@@ -31,29 +29,50 @@ def _grabaciones_base() -> Path:
     return base / 'mnt' / 'sayta_data' / 'data' / 'Grabaciones'
 
 
-def _iter_labeled_samples(community_dir: Path) -> List[Dict]:
-    """Retorna lista de {audio, sentence} para todos los audios etiquetados de una comunidad."""
+def _session_stats(session_dir: Path) -> Dict:
+    """Stats de una sola jornada."""
+    audios_dir = session_dir / 'audios_sin_procesar'
+    procesados_dir = session_dir / 'audios_procesados'
+    total = 0
+    etiquetados = 0
+    if audios_dir.exists():
+        for f in audios_dir.iterdir():
+            if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS:
+                total += 1
+                if (procesados_dir / f'{f.stem}.txt').exists():
+                    etiquetados += 1
+    return {
+        'total_audios': total,
+        'etiquetados': etiquetados,
+        'sin_etiquetar': total - etiquetados,
+        'porcentaje': round(etiquetados / total * 100, 1) if total > 0 else 0.0,
+    }
+
+
+def _iter_labeled_samples(session_dir: Path) -> List[Dict]:
+    """Pares {audio, sentence} de una sola jornada."""
+    audios_dir = session_dir / 'audios_sin_procesar'
+    procesados_dir = session_dir / 'audios_procesados'
     samples = []
-    for session_dir in sorted(community_dir.iterdir()):
-        if not session_dir.is_dir():
+    if not audios_dir.exists():
+        return samples
+    for audio_file in sorted(audios_dir.iterdir()):
+        if not audio_file.is_file() or audio_file.suffix.lower() not in AUDIO_EXTENSIONS:
             continue
-        audios_dir = session_dir / 'audios_sin_procesar'
-        procesados_dir = session_dir / 'audios_procesados'
-        if not audios_dir.exists():
-            continue
-        for audio_file in sorted(audios_dir.iterdir()):
-            if not audio_file.is_file() or audio_file.suffix.lower() not in AUDIO_EXTENSIONS:
-                continue
-            txt_path = procesados_dir / f'{audio_file.stem}.txt'
-            if txt_path.exists():
-                transcript = txt_path.read_text(encoding='utf-8').strip()
-                if transcript:
-                    samples.append({'audio': str(audio_file), 'sentence': transcript})
+        txt_path = procesados_dir / f'{audio_file.stem}.txt'
+        if txt_path.exists():
+            transcript = txt_path.read_text(encoding='utf-8').strip()
+            if transcript:
+                samples.append({'audio': str(audio_file), 'sentence': transcript})
     return samples
 
 
+# ------------------------------------------------------------------
+# Endpoints de exploración
+# ------------------------------------------------------------------
+
 def get_dataset_stats() -> Dict:
-    """Resumen de datos etiquetados disponibles por comunidad."""
+    """Resumen por comunidad (nivel 1)."""
     base = _grabaciones_base()
     if not base.exists():
         return {
@@ -64,27 +83,27 @@ def get_dataset_stats() -> Dict:
         }
 
     comunidades = []
+    total_global = 0
+    etiquetados_global = 0
+
     for community_dir in sorted(base.iterdir()):
         if not community_dir.is_dir():
             continue
-
         total = 0
         etiquetados = 0
         jornadas = 0
         for session_dir in sorted(community_dir.iterdir()):
             if not session_dir.is_dir():
                 continue
-            audios_dir = session_dir / 'audios_sin_procesar'
-            procesados_dir = session_dir / 'audios_procesados'
-            if not audios_dir.exists():
+            s = _session_stats(session_dir)
+            if s['total_audios'] == 0:
                 continue
             jornadas += 1
-            for f in audios_dir.iterdir():
-                if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS:
-                    total += 1
-                    if (procesados_dir / f'{f.stem}.txt').exists():
-                        etiquetados += 1
+            total += s['total_audios']
+            etiquetados += s['etiquetados']
 
+        total_global += total
+        etiquetados_global += etiquetados
         comunidades.append({
             'comunidad': community_dir.name,
             'total_jornadas': jornadas,
@@ -99,18 +118,23 @@ def get_dataset_stats() -> Dict:
         'base_path': str(base),
         'existe': True,
         'total_comunidades': len(comunidades),
+        'resumen_global': {
+            'total_audios': total_global,
+            'etiquetados': etiquetados_global,
+            'sin_etiquetar': total_global - etiquetados_global,
+            'porcentaje_completado': round(etiquetados_global / total_global * 100, 1) if total_global > 0 else 0.0,
+        },
         'comunidades': comunidades,
     }
 
 
 def get_community_stats(community_name: str) -> Optional[Dict]:
-    """Estadísticas detalladas por jornada para una comunidad."""
+    """Estadísticas detalladas por jornada para una comunidad (nivel 2)."""
     base = _grabaciones_base()
-    community_dir = None
-    for d in base.iterdir():
-        if d.is_dir() and d.name.lower() == community_name.lower():
-            community_dir = d
-            break
+    community_dir = next(
+        (d for d in base.iterdir() if d.is_dir() and d.name.lower() == community_name.lower()),
+        None,
+    )
     if community_dir is None:
         return None
 
@@ -118,22 +142,14 @@ def get_community_stats(community_name: str) -> Optional[Dict]:
     for session_dir in sorted(community_dir.iterdir()):
         if not session_dir.is_dir():
             continue
-        audios_dir = session_dir / 'audios_sin_procesar'
-        procesados_dir = session_dir / 'audios_procesados'
-        if not audios_dir.exists():
+        s = _session_stats(session_dir)
+        if s['total_audios'] == 0:
             continue
-        total = 0
-        etiquetados = 0
-        for f in audios_dir.iterdir():
-            if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS:
-                total += 1
-                if (procesados_dir / f'{f.stem}.txt').exists():
-                    etiquetados += 1
         jornadas.append({
+            'comunidad': community_dir.name,
             'jornada': session_dir.name,
-            'total_audios': total,
-            'etiquetados': etiquetados,
-            'porcentaje': round(etiquetados / total * 100, 1) if total > 0 else 0.0,
+            **s,
+            'apta': s['etiquetados'] > 0,
         })
 
     total_etiquetados = sum(j['etiquetados'] for j in jornadas)
@@ -148,26 +164,125 @@ def get_community_stats(community_name: str) -> Optional[Dict]:
     }
 
 
-def build_samples(community_names: List[str]) -> List[Dict]:
+def get_all_sessions() -> Dict:
     """
-    Construye lista de {audio, sentence} desde una o varias comunidades.
-    Filtra audios que no se puedan cargar.
+    Lista plana de TODAS las jornadas de TODAS las comunidades.
+    Usada por el frontend para mostrar checkboxes granulares de selección.
+    """
+    base = _grabaciones_base()
+    if not base.exists():
+        return {'existe': False, 'total_sesiones': 0, 'total_etiquetados': 0, 'sesiones': []}
+
+    sesiones = []
+    for community_dir in sorted(base.iterdir()):
+        if not community_dir.is_dir():
+            continue
+        for session_dir in sorted(community_dir.iterdir()):
+            if not session_dir.is_dir():
+                continue
+            s = _session_stats(session_dir)
+            if s['total_audios'] == 0:
+                continue
+            sesiones.append({
+                'comunidad': community_dir.name,
+                'jornada': session_dir.name,
+                **s,
+                'apta': s['etiquetados'] > 0,
+            })
+
+    total_etiquetados = sum(s['etiquetados'] for s in sesiones)
+    return {
+        'existe': True,
+        'total_sesiones': len(sesiones),
+        'total_etiquetados': total_etiquetados,
+        'sesiones': sesiones,
+    }
+
+
+# ------------------------------------------------------------------
+# Construcción de muestras para entrenamiento
+# ------------------------------------------------------------------
+
+def build_samples_from_sessions(sesiones: List[Dict]) -> List[Dict]:
+    """
+    Construye muestras desde jornadas específicas.
+    sesiones: [{"comunidad": "arhuaco", "jornada": "grabacion_15_03_26_fauna"}, ...]
     """
     base = _grabaciones_base()
     samples = []
 
-    for name in community_names:
-        community_dir = None
-        for d in base.iterdir():
-            if d.is_dir() and d.name.lower() == name.lower():
-                community_dir = d
-                break
-        if community_dir is None:
-            logger.warning('Comunidad "%s" no encontrada en %s', name, base)
-            continue
-        community_samples = _iter_labeled_samples(community_dir)
-        logger.info('Comunidad "%s": %d muestras etiquetadas', name, len(community_samples))
-        samples.extend(community_samples)
+    for item in sesiones:
+        comunidad = item['comunidad']
+        jornada = item['jornada']
 
-    logger.info('Total muestras para entrenamiento: %d', len(samples))
+        community_dir = next(
+            (d for d in base.iterdir() if d.is_dir() and d.name.lower() == comunidad.lower()),
+            None,
+        )
+        if community_dir is None:
+            logger.warning('Comunidad "%s" no encontrada', comunidad)
+            continue
+
+        session_dir = community_dir / jornada
+        if not session_dir.exists() or not session_dir.is_dir():
+            logger.warning('Jornada "%s/%s" no encontrada', comunidad, jornada)
+            continue
+
+        session_samples = _iter_labeled_samples(session_dir)
+        logger.info('Sesión %s/%s: %d muestras', comunidad, jornada, len(session_samples))
+        samples.extend(session_samples)
+
+    logger.info('Total muestras de %d sesiones: %d', len(sesiones), len(samples))
     return samples
+
+
+def build_samples_from_communities(community_names: List[str]) -> List[Dict]:
+    """Todas las jornadas etiquetadas de las comunidades indicadas."""
+    base = _grabaciones_base()
+    samples = []
+
+    for name in community_names:
+        community_dir = next(
+            (d for d in base.iterdir() if d.is_dir() and d.name.lower() == name.lower()),
+            None,
+        )
+        if community_dir is None:
+            logger.warning('Comunidad "%s" no encontrada', name)
+            continue
+        for session_dir in sorted(community_dir.iterdir()):
+            if not session_dir.is_dir():
+                continue
+            session_samples = _iter_labeled_samples(session_dir)
+            if session_samples:
+                logger.info('  %s/%s: %d muestras', name, session_dir.name, len(session_samples))
+                samples.extend(session_samples)
+
+    logger.info('Total muestras (comunidades %s): %d', community_names, len(samples))
+    return samples
+
+
+def build_all_samples() -> List[Dict]:
+    """Todos los audios etiquetados de TODAS las comunidades y jornadas."""
+    base = _grabaciones_base()
+    if not base.exists():
+        return []
+
+    samples = []
+    for community_dir in sorted(base.iterdir()):
+        if not community_dir.is_dir():
+            continue
+        for session_dir in sorted(community_dir.iterdir()):
+            if not session_dir.is_dir():
+                continue
+            session_samples = _iter_labeled_samples(session_dir)
+            if session_samples:
+                logger.info('  %s/%s: %d muestras', community_dir.name, session_dir.name, len(session_samples))
+                samples.extend(session_samples)
+
+    logger.info('Total global de muestras: %d', len(samples))
+    return samples
+
+
+# Alias para compatibilidad con código anterior
+def build_samples(community_names: List[str]) -> List[Dict]:
+    return build_samples_from_communities(community_names)

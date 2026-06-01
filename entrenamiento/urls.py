@@ -3,11 +3,13 @@ from django.urls import path
 from .views import (
     DatasetComunidadView,
     DatasetEstadoView,
+    DatasetSesionesView,
     EntrenarView,
     ExperimentoActivarView,
     ExperimentoDetailView,
     ExperimentoEstadoView,
     ExperimentoListView,
+    LenguasEntrenamientoView,
     ModeloDescargarView,
     ModeloListView,
     ModelosDisponiblesView,
@@ -16,13 +18,18 @@ from .views import (
 )
 
 urlpatterns = [
+    # Lenguas con estado ASR
+    path('lenguas/', LenguasEntrenamientoView.as_view(), name='entrenamiento_lenguas'),
+
     # Catálogo y gestión de modelos
     path('modelos-disponibles/', ModelosDisponiblesView.as_view(), name='entrenamiento_modelos_disponibles'),
     path('modelos/', ModeloListView.as_view(), name='entrenamiento_modelos'),
     path('modelos/descargar/', ModeloDescargarView.as_view(), name='entrenamiento_modelos_descargar'),
 
     # Dataset — datos etiquetados
+    # IMPORTANTE: 'sesiones/' debe ir ANTES del parámetro <str:community>/
     path('dataset/', DatasetEstadoView.as_view(), name='entrenamiento_dataset'),
+    path('dataset/sesiones/', DatasetSesionesView.as_view(), name='entrenamiento_dataset_sesiones'),
     path('dataset/<str:community>/', DatasetComunidadView.as_view(), name='entrenamiento_dataset_comunidad'),
 
     # Lanzar entrenamiento
