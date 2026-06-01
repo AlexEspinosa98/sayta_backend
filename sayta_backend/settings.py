@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     'translator_api',
     'terminos',
     'traduccion',
+    'entrenamiento',
 ]
 
 MIDDLEWARE = [
@@ -139,6 +140,10 @@ SPECTACULAR_SETTINGS = {
         {'name': 'Términos ES', 'description': 'Términos en español (entradas del diccionario)'},
         {'name': 'Términos Lengua', 'description': 'Términos en lengua indígena con definición'},
         {'name': 'Embeddings', 'description': 'Generación, activación y monitoreo de embeddings por lengua'},
+        {'name': 'Entrenamiento — Modelos', 'description': 'Descarga y gestión de modelos HuggingFace ASR'},
+        {'name': 'Entrenamiento — Dataset', 'description': 'Estadísticas de audios etiquetados por comunidad'},
+        {'name': 'Entrenamiento — Experimentos', 'description': 'Fine-tuning, seguimiento MLflow y activación de modelos'},
+        {'name': 'Entrenamiento — Transcripción', 'description': 'Transcripción de audio y pipeline audio → texto → traducción'},
     ],
 }
 
@@ -216,3 +221,25 @@ EMBEDDINGS_STORAGE_DIR = os.environ.get(
 
 # Modelo HuggingFace por defecto para generación de embeddings
 EMBEDDING_MODEL = os.environ.get('EMBEDDING_MODEL', 'intfloat/multilingual-e5-base')
+
+# ---------------------------------------------------------------------------
+# Módulo de entrenamiento de modelos ASR
+# ---------------------------------------------------------------------------
+
+# Directorio donde se guardan los modelos HF descargados
+AUDIO_MODELS_DIR = os.environ.get(
+    'AUDIO_MODELS_DIR',
+    str(BASE_DIR / 'audio_models'),
+)
+
+# Directorio donde se guardan los modelos fine-tuneados
+MODELOS_ENTRENADOS_DIR = os.environ.get(
+    'MODELOS_ENTRENADOS_DIR',
+    str(BASE_DIR / 'modelos_entrenados'),
+)
+
+# URI del servidor MLflow (local por defecto)
+MLFLOW_TRACKING_URI = os.environ.get(
+    'MLFLOW_TRACKING_URI',
+    str(BASE_DIR / 'mlruns'),
+)

@@ -26,4 +26,5 @@ urlpatterns = [
     path('api/', include('translator_api.urls')),
     path('api/terminos/', include('terminos.urls')),
     path('api/traduccion/', include('traduccion.urls')),
+    path('api/entrenamiento/', include('entrenamiento.urls')),
 ]

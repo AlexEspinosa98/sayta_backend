@@ -568,15 +568,286 @@ curl -X POST http://localhost:8000/api/terminos/embeddings/7f3e4c2a-.../activar/
 
 ---
 
+---
+
+## Épica 5 — Traducción Texto a Texto
+
+### HU-14 — Traducir texto con análisis multi-estrategia y conclusión
+
+**Como** usuario del traductor, **quiero** enviar un texto (palabra suelta o frase de varios términos) en español o en una lengua indígena, **para** obtener una conclusión clara con la traducción más probable y tres alternativas ordenadas por probabilidad con su definición.
+
+**Criterios de aceptación:**
+- El cliente envía `texto`, `lengua_id` y `direccion` (`es_a_lengua` o `lengua_a_es`).
+- Si la lengua no existe → 404.
+- Si la lengua no tiene embedding activo → 422 con mensaje de ayuda.
+- El pipeline analiza el texto en tres niveles: frase completa, n-gramas y tokens individuales.
+- Los resultados de los tres niveles se fusionan por término; para duplicados se conserva el mayor score.
+- La respuesta incluye `conclusion` con el resultado de mayor probabilidad.
+- Cada resultado en `resultados` incluye `termino` (lengua indígena), `termino_es` (español), `definicion`, `score`, `probabilidad` (los 3 suman 100 %), `mejor_coincidencia` y `coincidencia` (qué sub-consulta lo encontró).
+- Se indica qué versión de embedding se usó (id, versión, modelo, número de términos).
+
+**Endpoint:** `POST /api/traduccion/traducir/`
+
+---
+
+#### Caso 1 — Palabra simple, Español → Arhuaco
+
+```bash
+curl -X POST http://localhost:8000/api/traduccion/traducir/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "texto": "jaguar",
+    "lengua_id": 1,
+    "direccion": "es_a_lengua"
+  }'
+
+# Respuesta 200
+{
+  "texto_entrada": "jaguar",
+  "lengua": { "id": 1, "codigo": "iku", "nombre": "Arhuaco" },
+  "embedding": {
+    "version_id": "7f3e4c2a-1b5d-4a8e-9c3f-2d6b8e1a4f7c",
+    "version": "20260527_100000",
+    "modelo": "intfloat/multilingual-e5-base",
+    "num_terminos": 197
+  },
+  "direccion": "es→iku",
+  "conclusion": {
+    "termino": "Tigri",
+    "termino_es": "jaguar",
+    "definicion": "Jaguar (Panthera onca). Felino más grande de América.",
+    "probabilidad": 52.4
+  },
+  "resultados": [
+    {
+      "termino": "Tigri",
+      "termino_es": "jaguar",
+      "definicion": "Jaguar (Panthera onca). Felino más grande de América.",
+      "score": 0.9410,
+      "probabilidad": 52.4,
+      "mejor_coincidencia": true,
+      "coincidencia": "jaguar"
+    },
+    {
+      "termino": "Munkwu",
+      "termino_es": "araña",
+      "definicion": "Araña. Arácnido de la Sierra Nevada.",
+      "score": 0.5120,
+      "probabilidad": 28.5,
+      "mejor_coincidencia": false,
+      "coincidencia": "jaguar"
+    },
+    {
+      "termino": "Zeyku",
+      "termino_es": "escorpión",
+      "definicion": "Escorpión. Arácnido venenoso.",
+      "score": 0.3410,
+      "probabilidad": 19.0,
+      "mejor_coincidencia": false,
+      "coincidencia": "jaguar"
+    }
+  ]
+}
+```
+
+---
+
+#### Caso 2 — Frase compuesta, Arhuaco → Español
+
+El pipeline divide la frase en niveles: frase completa, bi/tri-gramas y tokens. Los resultados de todos los niveles se fusionan y se ordenan por probabilidad.
+
+```bash
+curl -X POST http://localhost:8000/api/traduccion/traducir/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "texto": "Du zari bunsi chano",
+    "lengua_id": 1,
+    "direccion": "lengua_a_es"
+  }'
+
+# Respuesta 200
+{
+  "texto_entrada": "Du zari bunsi chano",
+  "lengua": { "id": 1, "codigo": "iku", "nombre": "Arhuaco" },
+  "embedding": { ... },
+  "direccion": "iku→es",
+  "conclusion": {
+    "termino": "Du zari bunsi chano",
+    "termino_es": "buenos días",
+    "definicion": "Saludo de la mañana en lengua ikʉn.",
+    "probabilidad": 46.2
+  },
+  "resultados": [
+    {
+      "termino": "Du zari bunsi chano",
+      "termino_es": "buenos días",
+      "definicion": "Saludo de la mañana en lengua ikʉn.",
+      "score": 0.9801,
+      "probabilidad": 46.2,
+      "mejor_coincidencia": true,
+      "coincidencia": "Du zari bunsi chano"
+    },
+    {
+      "termino": "Du zari ɉwi nayo",
+      "termino_es": "buenas tardes",
+      "definicion": "Saludo de la tarde en lengua ikʉn.",
+      "score": 0.8740,
+      "probabilidad": 41.2,
+      "mejor_coincidencia": false,
+      "coincidencia": "Du zari"
+    },
+    {
+      "termino": "Bunachʉn",
+      "termino_es": "español",
+      "definicion": "Nombre del español o castellano en lengua ikʉn.",
+      "score": 0.2680,
+      "probabilidad": 12.6,
+      "mejor_coincidencia": false,
+      "coincidencia": "chano"
+    }
+  ]
+}
+```
+
+> El campo `coincidencia` muestra qué sub-consulta encontró cada resultado:
+> - `"Du zari bunsi chano"` → lo encontró la búsqueda de frase completa (nivel 1)
+> - `"Du zari"` → lo encontró un bigrama (nivel 2)
+> - `"chano"` → lo encontró un token individual (nivel 3)
+
+---
+
+#### Caso 3 — Lengua sin embedding activo
+
+```bash
+curl -X POST http://localhost:8000/api/traduccion/traducir/ \
+  -H "Content-Type: application/json" \
+  -d '{"texto": "montaña", "lengua_id": 2, "direccion": "es_a_lengua"}'
+
+# Respuesta 422
+{
+  "error": "La lengua \"Kogui\" no tiene un embedding activo. Genera uno con POST /api/terminos/embeddings/generar/ y actívalo con POST /api/terminos/embeddings/{id}/activar/."
+}
+```
+
+---
+
+#### Caso 4 — Lengua inexistente
+
+```bash
+curl -X POST http://localhost:8000/api/traduccion/traducir/ \
+  -H "Content-Type: application/json" \
+  -d '{"texto": "sol", "lengua_id": 99, "direccion": "es_a_lengua"}'
+
+# Respuesta 404
+{ "error": "Lengua con id=99 no existe." }
+```
+
+---
+
+#### Caso 5 — Body inválido
+
+```bash
+curl -X POST http://localhost:8000/api/traduccion/traducir/ \
+  -H "Content-Type: application/json" \
+  -d '{"texto": "agua", "lengua_id": 1}'
+
+# Respuesta 400
+{ "direccion": ["Este campo es requerido."] }
+```
+
+---
+
+### Campos del request
+
+| Campo | Tipo | Requerido | Descripción |
+|---|---|---|---|
+| `texto` | string | Sí | Texto a traducir (palabra o frase) |
+| `lengua_id` | integer | Sí | ID de la lengua indígena |
+| `direccion` | string | Sí | `"es_a_lengua"` o `"lengua_a_es"` |
+
+---
+
+### Campos de la respuesta
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `texto_entrada` | string | Texto recibido |
+| `lengua.id` | integer | ID de la lengua |
+| `lengua.codigo` | string | Código corto (ej. `iku`) |
+| `lengua.nombre` | string | Nombre completo (ej. `Arhuaco`) |
+| `embedding.version_id` | UUID | ID de la versión de embedding usada |
+| `embedding.version` | string | Timestamp de generación |
+| `embedding.modelo` | string | Modelo utilizado |
+| `embedding.num_terminos` | integer | Términos en el índice |
+| `direccion` | string | Dirección formateada (ej. `es→iku`) |
+| `conclusion.termino` | string | Término con mayor probabilidad |
+| `conclusion.termino_es` | string | Equivalente en español |
+| `conclusion.definicion` | string | Definición en español |
+| `conclusion.probabilidad` | float | % de probabilidad sobre los 3 resultados |
+| `resultados[].termino` | string | Término en la lengua indígena |
+| `resultados[].termino_es` | string | Equivalente en español |
+| `resultados[].definicion` | string | Definición en español |
+| `resultados[].score` | float | Similitud coseno cruda (0–1) |
+| `resultados[].probabilidad` | float | % relativo (los 3 suman 100 %) |
+| `resultados[].mejor_coincidencia` | bool | `true` solo en el resultado #1 |
+| `resultados[].coincidencia` | string | Sub-consulta que produjo este resultado |
+
+---
+
+### Cómo funciona el pipeline internamente
+
+Para una entrada de `N` palabras el sistema ejecuta hasta `1 + bigramas + trigramas + tokens` búsquedas semánticas en el índice FAISS:
+
+```
+Entrada: "Du zari bunsi chano"   (4 tokens)
+
+Nivel 1 — frase completa  (peso 1.00)
+  → "Du zari bunsi chano"
+
+Nivel 2 — bi/tri-gramas   (peso 0.92)
+  → "Du zari" · "zari bunsi" · "bunsi chano"
+  → "Du zari bunsi" · "zari bunsi chano"
+
+Nivel 3 — tokens solos    (peso 0.80, solo si len > 2)
+  → "zari" · "bunsi" · "chano"
+
+Fusión: por término, conserva el mayor score ajustado
+Filtro: descarta scores < 0.30
+Top 3: ordena descendente y toma los primeros 3
+Probabilidad: score_i / suma_total × 100
+Conclusión: el resultado #1 (mayor probabilidad)
+```
+
+---
+
+### Flujo completo
+
+```bash
+# Prerrequisito: embedding activo (Épica 4, HU-10 → HU-13)
+curl "http://localhost:8000/api/terminos/embeddings/?lengua=1&is_active=true"
+
+# Traducir español → arhuaco
+curl -X POST http://localhost:8000/api/traduccion/traducir/ \
+  -H "Content-Type: application/json" \
+  -d '{"texto": "jaguar", "lengua_id": 1, "direccion": "es_a_lengua"}'
+
+# Traducir frase arhuaca → español
+curl -X POST http://localhost:8000/api/traduccion/traducir/ \
+  -H "Content-Type: application/json" \
+  -d '{"texto": "Du zari bunsi chano", "lengua_id": 1, "direccion": "lengua_a_es"}'
+```
+
+---
+
 ## Swagger UI
 
 La documentación interactiva completa está disponible en:
 
 ```
-http://localhost:8000/api/terminos/docs/
+http://localhost:8000/api/docs/
 ```
 
 Schema OpenAPI JSON:
 ```
-http://localhost:8000/api/terminos/openapi.json
+http://localhost:8000/api/schema/
 ```
