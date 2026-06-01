@@ -54,6 +54,32 @@ os.environ.setdefault('HF_HOME', os.environ.get('HF_HOME', '/mnt/models'))
 os.environ.setdefault('TRANSFORMERS_CACHE', os.environ.get('TRANSFORMERS_CACHE', '/mnt/models/transformers'))
 
 # ---------------------------------------------------------------------------
+# Módulo de entrenamiento ASR — rutas en volumen NVMe
+# ---------------------------------------------------------------------------
+
+AUDIO_MODELS_DIR = os.environ.get(
+    'AUDIO_MODELS_DIR',
+    '/mnt/app_storage/audio_models',
+)
+
+MODELOS_ENTRENADOS_DIR = os.environ.get(
+    'MODELOS_ENTRENADOS_DIR',
+    '/mnt/app_storage/modelos_entrenados',
+)
+
+MLFLOW_TRACKING_URI = os.environ.get(
+    'MLFLOW_TRACKING_URI',
+    '/mnt/app_storage/mlruns',
+)
+
+# Logger del módulo de entrenamiento
+LOGGING['loggers']['entrenamiento'] = {
+    'handlers': ['console'],
+    'level': 'INFO',
+    'propagate': False,
+}
+
+# ---------------------------------------------------------------------------
 # Archivos estáticos
 # ---------------------------------------------------------------------------
 
