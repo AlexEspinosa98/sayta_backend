@@ -238,8 +238,10 @@ MODELOS_ENTRENADOS_DIR = os.environ.get(
     str(BASE_DIR / 'modelos_entrenados'),
 )
 
-# URI del servidor MLflow (local por defecto)
+# URI del servidor MLflow.
+# Usar SQLite (un solo archivo) para no necesitar servidor externo.
+# Formato absoluto: sqlite:////ruta/absoluta/mlflow.db
 MLFLOW_TRACKING_URI = os.environ.get(
     'MLFLOW_TRACKING_URI',
-    str(BASE_DIR / 'mlruns'),
+    f'sqlite:///{BASE_DIR / "mlflow.db"}',
 )

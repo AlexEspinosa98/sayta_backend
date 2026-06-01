@@ -69,7 +69,7 @@ MODELOS_ENTRENADOS_DIR = os.environ.get(
 
 MLFLOW_TRACKING_URI = os.environ.get(
     'MLFLOW_TRACKING_URI',
-    '/mnt/app_storage/mlruns',
+    'sqlite:////mnt/app_storage/mlruns/mlflow.db',
 )
 
 # Logger del módulo de entrenamiento
