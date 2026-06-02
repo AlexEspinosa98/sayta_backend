@@ -2,6 +2,7 @@
 Módulo de entrenamiento de modelos ASR para lenguas indígenas.
 
 Endpoints:
+  GET  /api/entrenamiento/sistema/                         Recursos del servidor (CPU, GPU, RAM)
   GET  /api/entrenamiento/modelos-disponibles/             Catálogo curado de modelos HF
   GET  /api/entrenamiento/modelos/                         Modelos descargados
   POST /api/entrenamiento/modelos/descargar/               Descarga un modelo desde HF Hub
@@ -557,6 +558,56 @@ class ExperimentoEstadoView(APIView):
         })
 
 
+class ExperimentoCancelarView(APIView):
+    @extend_schema(
+        tags=['Entrenamiento — Experimentos'],
+        summary='Cancelar un entrenamiento en curso',
+        description=(
+            'Envía una señal de parada al hilo de entrenamiento. '
+            'El proceso termina limpiamente al final del paso actual (puede tardar '
+            'hasta ~30 segundos en procesarse). '
+            'El experimento quedará en estado `fallido` con mensaje "Cancelado manualmente".'
+        ),
+        responses={
+            200: OpenApiResponse(description='Señal de cancelación enviada'),
+            404: OpenApiResponse(description='Experimento no encontrado'),
+            409: OpenApiResponse(description='El experimento no está en curso'),
+        },
+    )
+    def post(self, request, pk):
+        try:
+            exp = ExperimentoEntrenamiento.objects.get(pk=pk)
+        except ExperimentoEntrenamiento.DoesNotExist:
+            return Response({'error': 'Experimento no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if exp.estado != ExperimentoEntrenamiento.ESTADO_ENTRENANDO:
+            return Response(
+                {'error': f'El experimento tiene estado "{exp.estado}", no está en curso.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        cancelado = training_service.request_cancellation(exp.task_id) if exp.task_id else False
+
+        if not cancelado:
+            # El hilo ya murió pero la BD no se actualizó — resetear manualmente
+            from django.utils import timezone
+            exp.estado = ExperimentoEntrenamiento.ESTADO_FALLIDO
+            exp.error_mensaje = 'Cancelado manualmente (hilo ya no activo)'
+            exp.completed_at = timezone.now()
+            exp.save(update_fields=['estado', 'error_mensaje', 'completed_at'])
+            return Response({
+                'mensaje': 'Hilo no encontrado — experimento marcado como fallido directamente.',
+                'experimento_id': str(exp.id),
+                'estado': exp.estado,
+            })
+
+        return Response({
+            'mensaje': 'Señal de cancelación enviada. El entrenamiento parará al final del paso actual.',
+            'experimento_id': str(exp.id),
+            'estado_url': f'/api/entrenamiento/experimentos/{exp.id}/estado/',
+        })
+
+
 class ExperimentoActivarView(APIView):
     @extend_schema(
         tags=['Entrenamiento — Experimentos'],
@@ -846,6 +897,140 @@ class TranscribirTraducirView(APIView):
             'modelo_asr': exp.nombre,
             'transcripcion': transcripcion,
             'traduccion': traduccion_data,
+        })
+
+
+# ======================================================================
+# Estado del sistema (CPU / GPU / RAM)
+# ======================================================================
+
+class SistemaView(APIView):
+    @extend_schema(
+        tags=['Entrenamiento — Sistema'],
+        summary='Recursos del servidor disponibles para entrenamiento',
+        description=(
+            'Devuelve información sobre CPU, RAM y GPU del servidor. '
+            'Útil para diagnosticar por qué el entrenamiento es lento '
+            '(sin GPU el fine-tuning puede tardar 10-20× más).\n\n'
+            '**`gpu_disponible: false`** → el contenedor no tiene acceso a GPU. '
+            'Configura `deploy.resources.reservations.devices` en docker-compose.yml '
+            'y asegúrate de tener NVIDIA Container Toolkit instalado en el host.'
+        ),
+        responses={200: OpenApiResponse(description='Información de recursos del servidor')},
+    )
+    def get(self, request):
+        import platform
+        import torch
+
+        # ── GPU ──────────────────────────────────────────────────────────────
+        gpu_info = []
+        gpu_disponible = torch.cuda.is_available()
+        if gpu_disponible:
+            for i in range(torch.cuda.device_count()):
+                props = torch.cuda.get_device_properties(i)
+                mem_total = props.total_memory / 1024 ** 3
+                mem_reservada = torch.cuda.memory_reserved(i) / 1024 ** 3
+                mem_asignada = torch.cuda.memory_allocated(i) / 1024 ** 3
+                gpu_info.append({
+                    'indice': i,
+                    'nombre': props.name,
+                    'memoria_total_gb': round(mem_total, 2),
+                    'memoria_reservada_gb': round(mem_reservada, 2),
+                    'memoria_asignada_gb': round(mem_asignada, 2),
+                    'memoria_libre_gb': round(mem_total - mem_reservada, 2),
+                    'cuda_capability': f'{props.major}.{props.minor}',
+                    'multiprocessors': props.multi_processor_count,
+                })
+
+        # ── CPU ──────────────────────────────────────────────────────────────
+        cpu_info: dict = {'nucleos_logicos': os.cpu_count() or 0}
+        try:
+            import psutil
+            cpu_info['uso_porcentaje'] = psutil.cpu_percent(interval=0.5)
+            cpu_info['nucleos_fisicos'] = psutil.cpu_count(logical=False)
+        except ImportError:
+            pass
+
+        # Intentar leer /proc/cpuinfo en Linux
+        try:
+            with open('/proc/cpuinfo', 'r') as f:
+                lines = f.readlines()
+            modelos = {l.split(':')[1].strip() for l in lines if l.startswith('model name')}
+            if modelos:
+                cpu_info['modelo'] = list(modelos)[0]
+        except OSError:
+            cpu_info['modelo'] = platform.processor() or 'desconocido'
+
+        # ── RAM ───────────────────────────────────────────────────────────────
+        ram_info: dict = {}
+        try:
+            import psutil
+            vm = psutil.virtual_memory()
+            ram_info = {
+                'total_gb': round(vm.total / 1024 ** 3, 2),
+                'disponible_gb': round(vm.available / 1024 ** 3, 2),
+                'usado_gb': round(vm.used / 1024 ** 3, 2),
+                'uso_porcentaje': vm.percent,
+            }
+        except ImportError:
+            try:
+                mem = {}
+                with open('/proc/meminfo', 'r') as f:
+                    for line in f:
+                        key, val = line.split(':')
+                        mem[key.strip()] = int(val.strip().split()[0])
+                ram_info = {
+                    'total_gb': round(mem.get('MemTotal', 0) / 1024 ** 2, 2),
+                    'disponible_gb': round(mem.get('MemAvailable', 0) / 1024 ** 2, 2),
+                    'usado_gb': round((mem.get('MemTotal', 0) - mem.get('MemAvailable', 0)) / 1024 ** 2, 2),
+                }
+            except OSError:
+                ram_info = {'error': 'No se pudo leer /proc/meminfo'}
+
+        # ── Entrenamiento activo ──────────────────────────────────────────────
+        entrenando = ExperimentoEntrenamiento.objects.filter(
+            estado=ExperimentoEntrenamiento.ESTADO_ENTRENANDO
+        ).select_related('lengua', 'modelo_base').first()
+
+        entrenamiento_activo = None
+        if entrenando:
+            task_info = training_service.get_task_info(entrenando.task_id) if entrenando.task_id else None
+            entrenamiento_activo = {
+                'experimento_id': str(entrenando.id),
+                'nombre': entrenando.nombre,
+                'lengua': entrenando.lengua.codigo,
+                'modelo': entrenando.modelo_base.nombre_hf,
+                'started_at': task_info.get('started_at') if task_info else None,
+                'estado_hilo': task_info.get('estado') if task_info else 'desconocido (hilo no activo)',
+                'usando_gpu': gpu_disponible,
+                'fp16_activado': gpu_disponible,
+            }
+
+        # ── Recomendaciones ───────────────────────────────────────────────────
+        advertencias = []
+        if not gpu_disponible:
+            advertencias.append(
+                'GPU no disponible: el entrenamiento corre en CPU y puede tardar 10-20× más. '
+                'Añade soporte GPU al contenedor Docker con NVIDIA Container Toolkit.'
+            )
+        if ram_info.get('disponible_gb', 999) < 4:
+            advertencias.append(
+                f'RAM disponible baja ({ram_info.get("disponible_gb")} GB). '
+                'Riesgo de OOM durante carga de modelo o chunking de audios.'
+            )
+
+        return Response({
+            'gpu': {
+                'disponible': gpu_disponible,
+                'torch_version': torch.__version__,
+                'cuda_version': torch.version.cuda if gpu_disponible else None,
+                'dispositivos': gpu_info,
+            },
+            'cpu': cpu_info,
+            'ram': ram_info,
+            'sistema_operativo': platform.system(),
+            'entrenamiento_en_curso': entrenamiento_activo,
+            'advertencias': advertencias,
         })
 
 

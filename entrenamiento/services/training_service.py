@@ -40,11 +40,12 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
 _active_tasks: Dict[str, Dict] = {}
+_stop_events: Dict[str, threading.Event] = {}  # task_id → Event para cancelación
 _tasks_lock = threading.Lock()
 
 
@@ -55,9 +56,10 @@ _tasks_lock = threading.Lock()
 def launch_training(experimento_id: str, samples: List[Dict], config: Dict) -> str:
     """Lanza el entrenamiento en un hilo daemon. Retorna task_id."""
     task_id = str(uuid.uuid4())
+    stop_event = threading.Event()
     t = threading.Thread(
         target=_training_thread,
-        args=(experimento_id, samples, config, task_id),
+        args=(experimento_id, samples, config, task_id, stop_event),
         daemon=True,
         name=f'train_{experimento_id[:8]}',
     )
@@ -67,6 +69,7 @@ def launch_training(experimento_id: str, samples: List[Dict], config: Dict) -> s
             'started_at': datetime.now().isoformat(),
             'estado': 'iniciando',
         }
+        _stop_events[task_id] = stop_event
     t.start()
     return task_id
 
@@ -76,11 +79,24 @@ def get_task_info(task_id: str) -> Optional[Dict]:
         return _active_tasks.get(task_id)
 
 
+def request_cancellation(task_id: str) -> bool:
+    """Señala al hilo de entrenamiento que debe detenerse. Retorna True si existía."""
+    with _tasks_lock:
+        event = _stop_events.get(task_id)
+        if event:
+            event.set()
+            if task_id in _active_tasks:
+                _active_tasks[task_id]['estado'] = 'cancelando'
+            return True
+        return False
+
+
 # ==================================================================
 # Hilo de entrenamiento
 # ==================================================================
 
-def _training_thread(experimento_id: str, samples: List[Dict], config: Dict, task_id: str):
+def _training_thread(experimento_id: str, samples: List[Dict], config: Dict,
+                     task_id: str, stop_event: threading.Event):
     from django.db import connection
     from django.utils import timezone
     from entrenamiento.models import ExperimentoEntrenamiento
@@ -97,7 +113,7 @@ def _training_thread(experimento_id: str, samples: List[Dict], config: Dict, tas
                 _active_tasks[task_id]['estado'] = 'entrenando'
 
         metricas, output_dir, run_id, exp_id, exp_name, tracking_uri = _run_training(
-            exp, samples, config, task_id
+            exp, samples, config, task_id, stop_event
         )
 
         exp.refresh_from_db()
@@ -118,6 +134,23 @@ def _training_thread(experimento_id: str, samples: List[Dict], config: Dict, tas
         with _tasks_lock:
             _active_tasks.pop(task_id, None)
 
+    except _TrainingCancelledError:
+        logger.info('Entrenamiento %s cancelado por el usuario', experimento_id)
+        if exp is not None:
+            try:
+                from entrenamiento.models import ExperimentoEntrenamiento as _EE
+                from django.utils import timezone as _tz
+                exp.refresh_from_db()
+                exp.estado = _EE.ESTADO_FALLIDO
+                exp.error_mensaje = 'Cancelado manualmente por el usuario'
+                exp.completed_at = _tz.now()
+                exp.save(update_fields=['estado', 'error_mensaje', 'completed_at'])
+            except Exception:
+                pass
+        with _tasks_lock:
+            _active_tasks.pop(task_id, None)
+            _stop_events.pop(task_id, None)
+
     except Exception as exc:
         logger.exception('Entrenamiento %s falló: %s', experimento_id, exc)
         if exp is not None:
@@ -133,15 +166,21 @@ def _training_thread(experimento_id: str, samples: List[Dict], config: Dict, tas
                 pass
         with _tasks_lock:
             _active_tasks.pop(task_id, None)
+            _stop_events.pop(task_id, None)
     finally:
         connection.close()
+
+
+class _TrainingCancelledError(Exception):
+    """Lanzado por el callback de cancelación para detener el hilo limpiamente."""
 
 
 # ==================================================================
 # Núcleo del entrenamiento
 # ==================================================================
 
-def _run_training(exp, samples: List[Dict], config: Dict, task_id: str):
+def _run_training(exp, samples: List[Dict], config: Dict, task_id: str,
+                  stop_event: threading.Event):
     """
     Ejecuta el fine-tuning completo. Retorna
     (metricas, output_dir, mlflow_run_id, mlflow_exp_id, mlflow_exp_name, tracking_uri).
@@ -217,12 +256,12 @@ def _run_training(exp, samples: List[Dict], config: Dict, task_id: str):
         if use_cv:
             metricas, output_dir = _run_cross_validation(
                 exp, samples, config, tipo, modelo_hf, ruta_local,
-                output_dir, use_fp16, cv_folds, mlflow,
+                output_dir, use_fp16, cv_folds, mlflow, stop_event,
             )
         else:
             metricas, output_dir = _run_single_split(
                 exp, samples, config, tipo, modelo_hf, ruta_local,
-                output_dir, use_fp16, mlflow,
+                output_dir, use_fp16, mlflow, stop_event,
             )
 
         # --- Guardar config como artefacto ---
@@ -241,7 +280,12 @@ def _run_training(exp, samples: List[Dict], config: Dict, task_id: str):
 # ==================================================================
 
 def _run_single_split(exp, samples, config, tipo, modelo_hf, ruta_local,
-                      output_dir, use_fp16, mlflow):
+                      output_dir, use_fp16, mlflow, stop_event: threading.Event):
+    # Expandir audios largos en clips cortos antes de cualquier procesamiento
+    chunks_dir = Path(output_dir) / 'chunks'
+    chunks_dir.mkdir(parents=True, exist_ok=True)
+    samples = _expand_samples(samples, chunks_dir)
+
     model, processor = _load_model_for_training(tipo, modelo_hf, ruta_local, samples, config)
     train_ds, eval_ds = _build_hf_dataset(samples, processor, tipo)
 
@@ -266,7 +310,7 @@ def _run_single_split(exp, samples, config, tipo, modelo_hf, ruta_local,
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         data_collator=data_collator,
-        callbacks=[_MLflowEpochCallback()],
+        callbacks=[_MLflowEpochCallback(), _CancellationCallback(stop_event)],
         **extra_kwargs,
     )
 
@@ -295,13 +339,19 @@ def _run_single_split(exp, samples, config, tipo, modelo_hf, ruta_local,
 # ==================================================================
 
 def _run_cross_validation(exp, samples, config, tipo, modelo_hf, ruta_local,
-                          output_dir, use_fp16, k, mlflow):
+                          output_dir, use_fp16, k, mlflow, stop_event: threading.Event):
     """
     K-Fold CV: entrena K modelos, reporta métricas medias ± std.
     Guarda el mejor fold (menor WER) como modelo final.
     """
     from sklearn.model_selection import KFold
     import numpy as np
+
+    # Expandir audios largos ANTES del split de folds para que todos compartan
+    # los mismos chunks (eficiente: no re-genera archivos ya existentes).
+    chunks_dir = Path(output_dir) / 'chunks'
+    chunks_dir.mkdir(parents=True, exist_ok=True)
+    samples = _expand_samples(samples, chunks_dir)
 
     kf = KFold(n_splits=k, shuffle=True, random_state=42)
     indices = list(range(len(samples)))
@@ -354,7 +404,7 @@ def _run_cross_validation(exp, samples, config, tipo, modelo_hf, ruta_local,
             train_dataset=train_ds,
             eval_dataset=eval_ds,
             data_collator=data_collator,
-            callbacks=[_MLflowEpochCallback(fold=fold_idx)],
+            callbacks=[_MLflowEpochCallback(fold=fold_idx), _CancellationCallback(stop_event)],
             **extra_kwargs,
         )
 
@@ -547,51 +597,233 @@ def _load_model_for_training(tipo: str, modelo_hf: str, ruta_local: str,
 
 
 def _load_audio_16k(audio_path: str):
-    """Carga y resamplea audio a 16kHz. Retorna numpy array."""
+    """Carga y resamplea audio a 16kHz. Retorna numpy array float32."""
     import librosa
     speech, _ = librosa.load(audio_path, sr=16000, mono=True)
     return speech
 
 
+# Límites de Whisper: máx 30 s de audio y 448 tokens de transcripción.
+_WHISPER_MAX_AUDIO_SAMPLES = 30 * 16_000   # 30 s × 16 kHz
+_WHISPER_MAX_LABEL_TOKENS  = 448
+
+# Duración máxima objetivo para chunking de audios largos (ambos modelos).
+_MAX_CHUNK_DURATION_S = 25.0  # conservador: 25 s < límite 30 s de Whisper
+
+
+def _chunk_sample(sample: Dict, chunks_dir: Path) -> List[Dict]:
+    """
+    Si el audio dura más de _MAX_CHUNK_DURATION_S lo divide en clips cortos
+    usando VAD (silencios naturales) y distribuye el texto proporcionalmente.
+    Retorna lista de muestras (puede ser [sample] original si ya es corto).
+    """
+    import librosa
+    import soundfile as sf
+    import numpy as np
+
+    path = sample['audio']
+    sentence = sample['sentence']
+
+    try:
+        speech, _ = librosa.load(path, sr=16000, mono=True)
+    except Exception as exc:
+        logger.warning('No se pudo cargar %s para chunking: %s', path, exc)
+        return [sample]
+
+    total_samples = len(speech)
+    duration = total_samples / 16000.0
+    max_samples = int(_MAX_CHUNK_DURATION_S * 16000)
+
+    if duration <= _MAX_CHUNK_DURATION_S:
+        return [sample]
+
+    logger.info('Audio largo (%.1f s) detectado, dividiendo: %s', duration, Path(path).name)
+
+    # Detectar silencios para cortes naturales
+    try:
+        intervals = librosa.effects.split(speech, top_db=30)
+        # Puntos medios de los silencios entre intervalos de voz
+        silence_mids = []
+        for i in range(len(intervals) - 1):
+            mid = (int(intervals[i][1]) + int(intervals[i + 1][0])) // 2
+            silence_mids.append(mid)
+    except Exception:
+        silence_mids = []
+
+    # Construir chunks: avanzar greedy hasta max_samples, cortar en el
+    # silencio más cercano; si no hay silencio disponible, corte duro.
+    all_cuts = sorted(set([0] + silence_mids + [total_samples]))
+
+    chunk_bounds: List[Tuple[int, int]] = []
+    start = 0
+    while start < total_samples:
+        end_target = start + max_samples
+        if end_target >= total_samples:
+            chunk_bounds.append((start, total_samples))
+            break
+        # Buscar el corte de silencio más lejano que no supere end_target
+        best_cut = end_target  # fallback: corte duro
+        for cut in reversed(all_cuts):
+            if start < cut <= end_target:
+                best_cut = cut
+                break
+        chunk_bounds.append((start, best_cut))
+        start = best_cut
+
+    if not chunk_bounds:
+        return [sample]
+
+    words = sentence.split()
+    n_words = len(words)
+    n_chunks = len(chunk_bounds)
+    stem = Path(path).stem
+    result: List[Dict] = []
+
+    for idx, (cs, ce) in enumerate(chunk_bounds):
+        chunk_audio = speech[cs:ce]
+        chunk_dur = (ce - cs) / 16000.0
+
+        # Texto proporcional al índice del chunk
+        w_start = int(idx * n_words / n_chunks)
+        w_end = int((idx + 1) * n_words / n_chunks)
+        if w_end <= w_start:
+            w_end = min(w_start + 1, n_words)
+        chunk_text = ' '.join(words[w_start:w_end])
+
+        if not chunk_text.strip():
+            continue
+
+        chunk_path = chunks_dir / f'{stem}_chunk{idx:03d}.wav'
+        if not chunk_path.exists():
+            sf.write(str(chunk_path), chunk_audio, 16000)
+
+        result.append({'audio': str(chunk_path), 'sentence': chunk_text})
+        logger.debug('  chunk %d: %.1f s, %d palabras', idx, chunk_dur, w_end - w_start)
+
+    logger.info('  → %d chunks generados desde %s', len(result), Path(path).name)
+    return result if result else [sample]
+
+
+def _expand_samples(samples: List[Dict], chunks_dir: Path) -> List[Dict]:
+    """
+    Expande audios largos en clips de ≤ _MAX_CHUNK_DURATION_S.
+    Retorna lista potencialmente más larga que la entrada.
+    """
+    expanded: List[Dict] = []
+    for s in samples:
+        expanded.extend(_chunk_sample(s, chunks_dir))
+    if len(expanded) != len(samples):
+        logger.info(
+            'Chunking completado: %d muestras originales → %d clips cortos',
+            len(samples), len(expanded),
+        )
+    return expanded
+
+
 def _build_hf_dataset(samples: List[Dict], processor, tipo: str):
-    """Construye HF Dataset preprocesado y hace split 90/10."""
+    """
+    Construye HF Dataset preprocesado y hace split 90/10.
+
+    Se guardan las RUTAS de audio (no los arrays) en el Dataset para evitar
+    problemas con arrays numpy de longitud variable en PyArrow. La carga
+    ocurre dentro de cada función de preprocesamiento, una muestra a la vez.
+    """
     import datasets as hf_datasets
 
-    raw_data: Dict[str, List] = {'audio': [], 'sentence': []}
+    # --- Validar y filtrar muestras antes de crear el dataset ---
+    valid_paths: List[str] = []
+    valid_sentences: List[str] = []
     skipped = 0
+
     for s in samples:
-        try:
-            speech = _load_audio_16k(s['audio'])
-            raw_data['audio'].append(speech)
-            raw_data['sentence'].append(s['sentence'])
-        except Exception as e:
-            logger.warning('Audio no cargado %s: %s', s['audio'], e)
+        path = s['audio']
+        sentence = s['sentence'].strip()
+
+        if not sentence:
+            logger.warning('Transcripción vacía, descartada: %s', path)
             skipped += 1
+            continue
+
+        if not Path(path).exists():
+            logger.warning('Archivo no encontrado, descartado: %s', path)
+            skipped += 1
+            continue
+
+        if tipo == 'whisper':
+            # Comprobar longitud de tokens ANTES de entrenar para filtrar transcripciones largas
+            token_ids = processor.tokenizer(
+                sentence,
+                add_special_tokens=True,
+            ).input_ids
+            if len(token_ids) > _WHISPER_MAX_LABEL_TOKENS:
+                logger.warning(
+                    'Transcripción demasiado larga (%d tokens > %d), descartada: %s',
+                    len(token_ids), _WHISPER_MAX_LABEL_TOKENS, path,
+                )
+                skipped += 1
+                continue
+
+        valid_paths.append(path)
+        valid_sentences.append(sentence)
 
     if skipped:
-        logger.warning('%d audios descartados por error de carga', skipped)
+        logger.warning('%d muestras descartadas en validación previa', skipped)
 
-    if not raw_data['audio']:
-        raise RuntimeError('No se pudieron cargar muestras de audio. Verifica los archivos.')
+    if not valid_paths:
+        raise RuntimeError(
+            'No quedaron muestras válidas tras la validación. '
+            'Verifica que los audios existen y que las transcripciones tienen longitud razonable.'
+        )
 
-    dataset = hf_datasets.Dataset.from_dict(raw_data)
+    logger.info('%d muestras válidas para construir el dataset', len(valid_paths))
+
+    dataset = hf_datasets.Dataset.from_dict({
+        'path': valid_paths,
+        'sentence': valid_sentences,
+    })
     split = dataset.train_test_split(test_size=0.1, seed=42)
 
     if tipo == 'whisper':
         def preprocess_whisper(batch):
+            import numpy as np
+            # Cargar audio desde disco (evita almacenar arrays variables en PyArrow)
+            try:
+                speech = _load_audio_16k(batch['path'])
+            except Exception as exc:
+                raise RuntimeError(f'Error cargando {batch["path"]}: {exc}') from exc
+
+            # Truncar audio a 30 s (límite de Whisper)
+            if len(speech) > _WHISPER_MAX_AUDIO_SAMPLES:
+                speech = speech[:_WHISPER_MAX_AUDIO_SAMPLES]
+
             features = processor(
-                batch['audio'], sampling_rate=16000, return_tensors='np'
+                speech, sampling_rate=16000, return_tensors='np'
             ).input_features[0]
-            # processor.tokenizer directamente (as_target_processor deprecado en ≥4.44)
-            labels = processor.tokenizer(batch['sentence']).input_ids
+
+            # Tokenizar con truncación explícita ≤ 448 tokens
+            labels = processor.tokenizer(
+                batch['sentence'],
+                truncation=True,
+                max_length=_WHISPER_MAX_LABEL_TOKENS,
+            ).input_ids
+
             return {'input_features': features, 'labels': labels}
 
-        train_ds = split['train'].map(preprocess_whisper, remove_columns=['audio', 'sentence'])
-        eval_ds = split['test'].map(preprocess_whisper, remove_columns=['audio', 'sentence'])
+        train_ds = split['train'].map(
+            preprocess_whisper, remove_columns=['path', 'sentence']
+        )
+        eval_ds = split['test'].map(
+            preprocess_whisper, remove_columns=['path', 'sentence']
+        )
 
-    else:  # wav2vec2
+    else:  # wav2vec2 CTC
         def preprocess_wav2vec2(batch):
-            inputs = processor(batch['audio'], sampling_rate=16000)
+            try:
+                speech = _load_audio_16k(batch['path'])
+            except Exception as exc:
+                raise RuntimeError(f'Error cargando {batch["path"]}: {exc}') from exc
+
+            inputs = processor(speech, sampling_rate=16000)
             # processor.tokenizer directamente (as_target_processor deprecado en ≥4.44)
             labels = processor.tokenizer(batch['sentence'])
             return {
@@ -599,8 +831,12 @@ def _build_hf_dataset(samples: List[Dict], processor, tipo: str):
                 'labels': labels.input_ids,
             }
 
-        train_ds = split['train'].map(preprocess_wav2vec2, remove_columns=['audio', 'sentence'])
-        eval_ds = split['test'].map(preprocess_wav2vec2, remove_columns=['audio', 'sentence'])
+        train_ds = split['train'].map(
+            preprocess_wav2vec2, remove_columns=['path', 'sentence']
+        )
+        eval_ds = split['test'].map(
+            preprocess_wav2vec2, remove_columns=['path', 'sentence']
+        )
 
     return train_ds, eval_ds
 
@@ -766,6 +1002,32 @@ def _apply_peft(model, tipo: str, config: Dict):
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
     return model
+
+
+# ==================================================================
+# Callback de cancelación — para detener el Trainer limpiamente
+# ==================================================================
+
+def _CancellationCallback(stop_event: threading.Event):
+    """
+    Factory que devuelve un TrainerCallback que para el entrenamiento
+    cuando stop_event está señalado (vía request_cancellation()).
+    """
+    from transformers import TrainerCallback
+
+    class _Callback(TrainerCallback):
+        def on_step_end(self, args, state, control, **kwargs):
+            if stop_event.is_set():
+                logger.info('Cancelación recibida en step %d, deteniendo...', state.global_step)
+                control.should_training_stop = True
+            return control
+
+        def on_epoch_end(self, args, state, control, **kwargs):
+            if stop_event.is_set():
+                control.should_training_stop = True
+            return control
+
+    return _Callback()
 
 
 # ==================================================================

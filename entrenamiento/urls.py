@@ -6,6 +6,7 @@ from .views import (
     DatasetSesionesView,
     EntrenarView,
     ExperimentoActivarView,
+    ExperimentoCancelarView,
     ExperimentoDetailView,
     ExperimentoEstadoView,
     ExperimentoListView,
@@ -13,11 +14,15 @@ from .views import (
     ModeloDescargarView,
     ModeloListView,
     ModelosDisponiblesView,
+    SistemaView,
     TranscribirTraducirView,
     TranscribirView,
 )
 
 urlpatterns = [
+    # Estado del sistema
+    path('sistema/', SistemaView.as_view(), name='entrenamiento_sistema'),
+
     # Lenguas con estado ASR
     path('lenguas/', LenguasEntrenamientoView.as_view(), name='entrenamiento_lenguas'),
 
@@ -39,6 +44,7 @@ urlpatterns = [
     path('experimentos/', ExperimentoListView.as_view(), name='entrenamiento_experimentos'),
     path('experimentos/<uuid:pk>/', ExperimentoDetailView.as_view(), name='entrenamiento_experimento_detail'),
     path('experimentos/<uuid:pk>/estado/', ExperimentoEstadoView.as_view(), name='entrenamiento_experimento_estado'),
+    path('experimentos/<uuid:pk>/cancelar/', ExperimentoCancelarView.as_view(), name='entrenamiento_experimento_cancelar'),
     path('experimentos/<uuid:pk>/activar/', ExperimentoActivarView.as_view(), name='entrenamiento_experimento_activar'),
 
     # Transcripción con modelo activo (integración con pipeline de traducción)
