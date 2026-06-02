@@ -932,16 +932,21 @@ def _build_training_args(tipo: str, output_dir: str, config: Dict, fp16: bool):
     use_eval_strategy = tf_version >= (4, 46)
     strategy_kwarg = 'eval_strategy' if use_eval_strategy else 'evaluation_strategy'
 
+    # Defaults conservadores para GPU de 8 GB (batch=1 + grad_accum=8 = efectivo 8)
+    default_batch = 1 if tipo == 'whisper' else 4
+    default_grad_accum = 8 if tipo == 'whisper' else 2
+
     common = {
         'output_dir': output_dir,
-        'per_device_train_batch_size': config.get('per_device_train_batch_size', 4),
-        'per_device_eval_batch_size': config.get('per_device_eval_batch_size', 4),
-        'gradient_accumulation_steps': config.get('gradient_accumulation_steps', 2),
+        'per_device_train_batch_size': config.get('per_device_train_batch_size', default_batch),
+        'per_device_eval_batch_size': config.get('per_device_eval_batch_size', default_batch),
+        'gradient_accumulation_steps': config.get('gradient_accumulation_steps', default_grad_accum),
         'learning_rate': config.get('learning_rate', 1e-5 if tipo == 'whisper' else 1e-4),
         'warmup_steps': config.get('warmup_steps', 100),
         'num_train_epochs': config.get('num_train_epochs', 20),
         'weight_decay': config.get('weight_decay', 0.01),
         'fp16': fp16,
+        'gradient_checkpointing': config.get('gradient_checkpointing', True),
         strategy_kwarg: 'epoch',
         'save_strategy': 'epoch',
         'load_best_model_at_end': True,
@@ -950,20 +955,20 @@ def _build_training_args(tipo: str, output_dir: str, config: Dict, fp16: bool):
         'logging_steps': 10,
         'push_to_hub': False,
         'report_to': [],
+        'dataloader_num_workers': 0,  # evitar conflictos con hilos de Django
     }
 
     if tipo == 'whisper':
         from transformers import Seq2SeqTrainingArguments
         return Seq2SeqTrainingArguments(
             predict_with_generate=True,
-            generation_max_length=225,
+            generation_max_length=128,   # reducido de 225 para ahorrar VRAM en eval
             **common,
         )
     else:
         from transformers import TrainingArguments
         return TrainingArguments(
             group_by_length=True,
-            gradient_checkpointing=True,
             **common,
         )
 
