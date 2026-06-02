@@ -286,3 +286,88 @@ def build_all_samples() -> List[Dict]:
 # Alias para compatibilidad con código anterior
 def build_samples(community_names: List[str]) -> List[Dict]:
     return build_samples_from_communities(community_names)
+
+
+# ------------------------------------------------------------------
+# Subida de audios al dataset
+# ------------------------------------------------------------------
+
+def save_audio_sample(
+    comunidad: str,
+    jornada: str,
+    audio_file,
+    transcripcion: str,
+) -> Dict:
+    """
+    Guarda un par (audio, transcripción) en la estructura de Grabaciones.
+    Crea los directorios comunidad/jornada si no existen.
+    Si ya existe un archivo con el mismo nombre añade sufijo de timestamp.
+
+    Retorna un dict con rutas, duración y estadísticas actualizadas de la jornada.
+    """
+    from datetime import datetime
+    from pathlib import Path as _Path
+
+    base = _grabaciones_base()
+    session_dir = base / comunidad / jornada
+    audios_dir = session_dir / 'audios_sin_procesar'
+    procesados_dir = session_dir / 'audios_procesados'
+
+    audios_dir.mkdir(parents=True, exist_ok=True)
+    procesados_dir.mkdir(parents=True, exist_ok=True)
+
+    # Resolver nombre de archivo — evitar sobreescrituras
+    original_name = _Path(audio_file.name).name
+    stem = _Path(original_name).stem
+    suffix = _Path(original_name).suffix.lower()
+    audio_path = audios_dir / f'{stem}{suffix}'
+
+    if audio_path.exists():
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        stem = f'{stem}_{ts}'
+        audio_path = audios_dir / f'{stem}{suffix}'
+
+    # Guardar audio
+    with open(audio_path, 'wb') as fh:
+        for chunk in audio_file.chunks():
+            fh.write(chunk)
+
+    # Guardar transcripción
+    txt_path = procesados_dir / f'{stem}.txt'
+    txt_path.write_text(transcripcion.strip(), encoding='utf-8')
+
+    # Duración del audio (best-effort)
+    duracion = None
+    try:
+        import soundfile as sf
+        info = sf.info(str(audio_path))
+        duracion = round(info.duration, 2)
+    except Exception:
+        try:
+            import librosa
+            duracion = round(librosa.get_duration(path=str(audio_path)), 2)
+        except Exception:
+            pass
+
+    # Stats actualizadas de la jornada
+    stats = _session_stats(session_dir)
+
+    logger.info(
+        'Audio guardado: %s/%s/%s (%.1f s)',
+        comunidad, jornada, audio_path.name, duracion or 0,
+    )
+
+    return {
+        'comunidad': comunidad,
+        'jornada': jornada,
+        'archivo_audio': audio_path.name,
+        'transcripcion_guardada': transcripcion.strip(),
+        'duracion_segundos': duracion,
+        'ruta_relativa': f'Grabaciones/{comunidad}/{jornada}/audios_sin_procesar/{audio_path.name}',
+        'jornada_stats': {
+            'total_audios': stats['total_audios'],
+            'etiquetados': stats['etiquetados'],
+            'sin_etiquetar': stats['sin_etiquetar'],
+            'porcentaje': stats['porcentaje'],
+        },
+    }

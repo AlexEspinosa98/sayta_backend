@@ -15,6 +15,7 @@ from .views import (
     ModeloListView,
     ModelosDisponiblesView,
     SistemaView,
+    SubirAudioView,
     TranscribirTraducirView,
     TranscribirView,
 )
@@ -32,9 +33,10 @@ urlpatterns = [
     path('modelos/descargar/', ModeloDescargarView.as_view(), name='entrenamiento_modelos_descargar'),
 
     # Dataset — datos etiquetados
-    # IMPORTANTE: 'sesiones/' debe ir ANTES del parámetro <str:community>/
+    # IMPORTANTE: rutas fijas ('sesiones/', 'subir/') deben ir ANTES del parámetro <str:community>/
     path('dataset/', DatasetEstadoView.as_view(), name='entrenamiento_dataset'),
     path('dataset/sesiones/', DatasetSesionesView.as_view(), name='entrenamiento_dataset_sesiones'),
+    path('dataset/subir/', SubirAudioView.as_view(), name='entrenamiento_dataset_subir'),
     path('dataset/<str:community>/', DatasetComunidadView.as_view(), name='entrenamiento_dataset_comunidad'),
 
     # Lanzar entrenamiento

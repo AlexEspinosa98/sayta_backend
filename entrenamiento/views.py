@@ -34,6 +34,7 @@ from .serializers import (
     ExperimentoDetailSerializer,
     ExperimentoListSerializer,
     ModeloAudioSerializer,
+    SubirAudioSerializer,
     TranscribirRequestSerializer,
     TranscribirTraducirRequestSerializer,
     SesionSerializer,
@@ -211,6 +212,82 @@ class DatasetComunidadView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
         return Response(stats)
+
+
+class SubirAudioView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+
+    @extend_schema(
+        tags=['Entrenamiento — Dataset'],
+        summary='Subir un audio con su transcripción al dataset de entrenamiento',
+        description=(
+            'Guarda un archivo de audio y su transcripción en la estructura de Grabaciones '
+            'del servidor, organizándolo por comunidad y jornada.\n\n'
+            '**Estructura resultante en disco:**\n'
+            '```\n'
+            'Grabaciones/\n'
+            '  <comunidad>/\n'
+            '    <jornada>/\n'
+            '      audios_sin_procesar/  ← audio guardado aquí\n'
+            '      audios_procesados/    ← transcripción .txt guardada aquí\n'
+            '```\n\n'
+            'La comunidad y jornada se crean automáticamente si no existen. '
+            'Si el nombre de archivo ya existe, se añade un sufijo de timestamp.\n\n'
+            '**Formatos de audio aceptados:** .wav, .mp3, .mp4, .m4a, .ogg, .flac'
+        ),
+        request=SubirAudioSerializer,
+        responses={
+            201: OpenApiResponse(description='Audio guardado exitosamente'),
+            400: OpenApiResponse(description='Parámetros inválidos o extensión no permitida'),
+            500: OpenApiResponse(description='Error al guardar en disco'),
+        },
+        examples=[
+            OpenApiExample(
+                'Respuesta exitosa',
+                value={
+                    'mensaje': 'Audio guardado exitosamente.',
+                    'comunidad': 'arhuaco',
+                    'jornada': 'grabacion_junio_2026',
+                    'archivo_audio': 'saludo_001.wav',
+                    'duracion_segundos': 8.4,
+                    'transcripcion_guardada': 'Nakua se wintukua',
+                    'ruta_relativa': 'Grabaciones/arhuaco/grabacion_junio_2026/audios_sin_procesar/saludo_001.wav',
+                    'jornada_stats': {
+                        'total_audios': 15,
+                        'etiquetados': 15,
+                        'sin_etiquetar': 0,
+                        'porcentaje': 100.0,
+                    },
+                },
+                response_only=True,
+                status_codes=['201'],
+            ),
+        ],
+    )
+    def post(self, request):
+        serializer = SubirAudioSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        data = serializer.validated_data
+        try:
+            resultado = dataset_service.save_audio_sample(
+                comunidad=data['comunidad'],
+                jornada=data['jornada'],
+                audio_file=data['audio'],
+                transcripcion=data['transcripcion'],
+            )
+        except Exception as exc:
+            logger.error('Error guardando audio: %s', exc, exc_info=True)
+            return Response(
+                {'error': f'Error al guardar el audio en disco: {exc}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response(
+            {'mensaje': 'Audio guardado exitosamente.', **resultado},
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class DatasetSesionesView(APIView):

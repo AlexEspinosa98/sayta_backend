@@ -120,6 +120,48 @@ class EntrenarRequestSerializer(serializers.Serializer):
         return data
 
 
+class SubirAudioSerializer(serializers.Serializer):
+    comunidad = serializers.CharField(
+        max_length=100,
+        help_text='Nombre de la comunidad (ej: "arhuaco", "kogui"). Se crea si no existe.',
+    )
+    jornada = serializers.CharField(
+        max_length=100,
+        help_text='Nombre de la jornada o sesión (ej: "grabacion_junio_2026"). Se crea si no existe.',
+    )
+    audio = serializers.FileField(
+        help_text='Archivo de audio (.wav, .mp3, .ogg, .flac, .m4a, .mp4)',
+    )
+    transcripcion = serializers.CharField(
+        allow_blank=False,
+        help_text='Texto transcrito del audio en la lengua indígena correspondiente.',
+    )
+
+    def validate_audio(self, value):
+        from pathlib import Path
+        PERMITIDAS = {'.wav', '.mp3', '.mp4', '.m4a', '.ogg', '.flac'}
+        ext = Path(value.name).suffix.lower()
+        if ext not in PERMITIDAS:
+            raise serializers.ValidationError(
+                f'Extensión "{ext}" no permitida. Usa: {", ".join(sorted(PERMITIDAS))}'
+            )
+        return value
+
+    def validate_comunidad(self, value):
+        import re
+        limpio = re.sub(r'[^\w\-]', '_', value.strip().lower())
+        if not limpio:
+            raise serializers.ValidationError('Nombre de comunidad inválido.')
+        return limpio
+
+    def validate_jornada(self, value):
+        import re
+        limpio = re.sub(r'[^\w\-]', '_', value.strip().lower())
+        if not limpio:
+            raise serializers.ValidationError('Nombre de jornada inválido.')
+        return limpio
+
+
 class TranscribirRequestSerializer(serializers.Serializer):
     lengua_id = serializers.IntegerField()
     audio = serializers.FileField(
