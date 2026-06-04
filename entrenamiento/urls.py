@@ -14,6 +14,7 @@ from .views import (
     ModeloDescargarView,
     ModeloListView,
     ModelosDisponiblesView,
+    SistemaLiberarMemoriaView,
     SistemaView,
     SubirAudioView,
     TranscribirTraducirView,
@@ -23,6 +24,7 @@ from .views import (
 urlpatterns = [
     # Estado del sistema
     path('sistema/', SistemaView.as_view(), name='entrenamiento_sistema'),
+    path('sistema/liberar-memoria/', SistemaLiberarMemoriaView.as_view(), name='entrenamiento_liberar_memoria'),
 
     # Lenguas con estado ASR
     path('lenguas/', LenguasEntrenamientoView.as_view(), name='entrenamiento_lenguas'),

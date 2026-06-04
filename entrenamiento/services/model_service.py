@@ -6,6 +6,7 @@ Gestión de modelos HuggingFace para ASR:
 """
 
 import logging
+import gc
 import threading
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -181,7 +182,52 @@ def load_asr_model(ruta_local: str, tipo: str) -> Tuple:
 
 def invalidate_cache(ruta_local: str) -> None:
     with _cache_lock:
-        _loaded_models.pop(ruta_local, None)
+        cached = _loaded_models.pop(ruta_local, None)
+    _release_cached_model(cached)
+
+
+def clear_model_cache() -> int:
+    """Descarga de memoria todos los modelos ASR cacheados."""
+    with _cache_lock:
+        count = len(_loaded_models)
+        cached_models = list(_loaded_models.values())
+        _loaded_models.clear()
+
+    for cached in cached_models:
+        _release_cached_model(cached)
+
+    return count
+
+
+def cache_info() -> Dict:
+    with _cache_lock:
+        return {
+            'modelos_cacheados': len(_loaded_models),
+            'rutas': list(_loaded_models.keys()),
+        }
+
+
+def _release_cached_model(cached: Optional[Tuple]) -> None:
+    if not cached:
+        return
+
+    model = cached[0]
+    try:
+        if hasattr(model, 'cpu'):
+            model.cpu()
+    except Exception:
+        logger.debug('No se pudo mover modelo cacheado a CPU antes de liberarlo', exc_info=True)
+
+    del cached
+    gc.collect()
+
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except Exception:
+        logger.debug('No se pudo limpiar caché CUDA', exc_info=True)
 
 
 def transcribe_audio(audio_path: str, model, processor, tipo: str, language: str = 'es') -> str:

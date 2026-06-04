@@ -14,9 +14,9 @@ Flujo completo:
 
 Config admitida (todos opcionales, con valores por defecto):
   num_train_epochs              int   = 20
-  per_device_train_batch_size   int   = 4
-  per_device_eval_batch_size    int   = 4
-  gradient_accumulation_steps   int   = 2
+  per_device_train_batch_size   int   = 1 whisper / 4 wav2vec2
+  per_device_eval_batch_size    int   = 1 whisper / 4 wav2vec2
+  gradient_accumulation_steps   int   = 8 whisper / 2 wav2vec2
   learning_rate                 float = 1e-4
   weight_decay                  float = 0.005
   warmup_steps                  int   = 100
@@ -35,6 +35,7 @@ Config admitida (todos opcionales, con valores por defecto):
 import json
 import logging
 import os
+import gc
 import threading
 import uuid
 from dataclasses import dataclass
@@ -43,6 +44,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union  # noqa: F401
 
 logger = logging.getLogger(__name__)
+
+os.environ.setdefault('PYTORCH_ALLOC_CONF', 'expandable_segments:True')
 
 _active_tasks: Dict[str, Dict] = {}
 _stop_events: Dict[str, threading.Event] = {}  # task_id → Event para cancelación
@@ -89,6 +92,38 @@ def request_cancellation(task_id: str) -> bool:
                 _active_tasks[task_id]['estado'] = 'cancelando'
             return True
         return False
+
+
+def cleanup_torch_memory() -> Dict[str, Any]:
+    """Libera caché CUDA/PyTorch retenida por este proceso."""
+    gc.collect()
+    info = {'cuda_disponible': False}
+
+    try:
+        import torch
+    except ImportError:
+        return info
+
+    info['cuda_disponible'] = torch.cuda.is_available()
+    if not torch.cuda.is_available():
+        return info
+
+    dispositivos = []
+    for device_idx in range(torch.cuda.device_count()):
+        before_allocated = torch.cuda.memory_allocated(device_idx)
+        before_reserved = torch.cuda.memory_reserved(device_idx)
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+        dispositivos.append({
+            'indice': device_idx,
+            'asignada_antes_gb': round(before_allocated / 1024 ** 3, 3),
+            'reservada_antes_gb': round(before_reserved / 1024 ** 3, 3),
+            'asignada_despues_gb': round(torch.cuda.memory_allocated(device_idx) / 1024 ** 3, 3),
+            'reservada_despues_gb': round(torch.cuda.memory_reserved(device_idx) / 1024 ** 3, 3),
+        })
+
+    info['dispositivos'] = dispositivos
+    return info
 
 
 # ==================================================================
@@ -153,13 +188,14 @@ def _training_thread(experimento_id: str, samples: List[Dict], config: Dict,
 
     except Exception as exc:
         logger.exception('Entrenamiento %s falló: %s', experimento_id, exc)
+        error_mensaje = _format_training_error(exc, config)
         if exp is not None:
             try:
                 from entrenamiento.models import ExperimentoEntrenamiento as _EE
                 from django.utils import timezone as _tz
                 exp.refresh_from_db()
                 exp.estado = _EE.ESTADO_FALLIDO
-                exp.error_mensaje = str(exc)
+                exp.error_mensaje = error_mensaje
                 exp.completed_at = _tz.now()
                 exp.save(update_fields=['estado', 'error_mensaje', 'completed_at'])
             except Exception:
@@ -168,7 +204,26 @@ def _training_thread(experimento_id: str, samples: List[Dict], config: Dict,
             _active_tasks.pop(task_id, None)
             _stop_events.pop(task_id, None)
     finally:
+        cleanup_torch_memory()
         connection.close()
+
+
+def _format_training_error(exc: Exception, config: Dict) -> str:
+    message = str(exc)
+    if 'CUDA out of memory' not in message:
+        return message
+
+    batch_size = config.get('per_device_train_batch_size', 'no definido')
+    use_peft = config.get('use_peft', False)
+    return (
+        f'{message}\n\n'
+        'Recomendación para GPU de 8 GB: usa `per_device_train_batch_size=1`, '
+        '`gradient_accumulation_steps=8` o mayor, `gradient_checkpointing=true`, '
+        '`fp16=true` y preferiblemente `use_peft=true`. '
+        f'Configuración recibida: per_device_train_batch_size={batch_size}, use_peft={use_peft}. '
+        'También puedes llamar `POST /api/entrenamiento/sistema/liberar-memoria/` '
+        'antes de reintentar.'
+    )
 
 
 class _TrainingCancelledError(Exception):
@@ -190,6 +245,8 @@ def _run_training(exp, samples: List[Dict], config: Dict, task_id: str,
     import mlflow
     import torch
     from django.conf import settings
+
+    _prepare_memory_for_training(config)
 
     tipo = exp.modelo_base.tipo
     modelo_hf = exp.modelo_base.nombre_hf
@@ -275,6 +332,41 @@ def _run_training(exp, samples: List[Dict], config: Dict, task_id: str,
     return metricas, output_dir, run_id, exp_mlflow_id, experiment_name, tracking_uri
 
 
+def _prepare_memory_for_training(config: Dict) -> None:
+    if config.get('clear_asr_cache_before_training', True):
+        try:
+            from entrenamiento.services import model_service
+            released = model_service.clear_model_cache()
+            if released:
+                logger.info('Modelos ASR cacheados liberados antes de entrenar: %d', released)
+        except Exception:
+            logger.warning('No se pudo liberar caché ASR antes de entrenar', exc_info=True)
+
+    cleanup_torch_memory()
+
+
+def _release_training_objects(*objects) -> None:
+    for obj in objects:
+        if obj is None:
+            continue
+        model = getattr(obj, 'model', obj)
+        try:
+            if hasattr(model, 'cpu'):
+                model.cpu()
+        except Exception:
+            logger.debug('No se pudo mover objeto de entrenamiento a CPU', exc_info=True)
+
+        for attr in ('optimizer', 'lr_scheduler', 'accelerator'):
+            if hasattr(obj, attr):
+                try:
+                    setattr(obj, attr, None)
+                except Exception:
+                    logger.debug('No se pudo limpiar atributo %s del Trainer', attr, exc_info=True)
+
+    gc.collect()
+    cleanup_torch_memory()
+
+
 # ==================================================================
 # Estrategia 1 — Split simple 90/10
 # ==================================================================
@@ -286,52 +378,56 @@ def _run_single_split(exp, samples, config, tipo, modelo_hf, ruta_local,
     chunks_dir.mkdir(parents=True, exist_ok=True)
     samples = _expand_samples(samples, chunks_dir)
 
-    model, processor = _load_model_for_training(tipo, modelo_hf, ruta_local, samples, config)
-    train_ds, eval_ds = _build_hf_dataset(samples, processor, tipo)
+    model = processor = train_ds = eval_ds = data_collator = trainer = None
+    try:
+        model, processor = _load_model_for_training(tipo, modelo_hf, ruta_local, samples, config)
+        train_ds, eval_ds = _build_hf_dataset(samples, processor, tipo)
 
-    exp.num_muestras_train = len(train_ds)
-    exp.num_muestras_eval = len(eval_ds)
-    exp.save(update_fields=['num_muestras_train', 'num_muestras_eval'])
+        exp.num_muestras_train = len(train_ds)
+        exp.num_muestras_eval = len(eval_ds)
+        exp.save(update_fields=['num_muestras_train', 'num_muestras_eval'])
 
-    mlflow.log_params({'num_train': len(train_ds), 'num_eval': len(eval_ds)})
+        mlflow.log_params({'num_train': len(train_ds), 'num_eval': len(eval_ds)})
 
-    if config.get('use_peft', False):
-        model = _apply_peft(model, tipo, config)
+        if config.get('use_peft', False):
+            model = _apply_peft(model, tipo, config)
 
-    training_args = _build_training_args(tipo, output_dir, config, use_fp16)
-    data_collator = _build_collator(tipo, processor, model)
-    compute_metrics_fn = _build_compute_metrics(processor, tipo)
+        training_args = _build_training_args(tipo, output_dir, config, use_fp16)
+        data_collator = _build_collator(tipo, processor, model)
+        compute_metrics_fn = _build_compute_metrics(processor, tipo)
 
-    TrainerClass, extra_kwargs = _get_trainer_class(tipo)
-    trainer = TrainerClass(
-        model=model,
-        args=training_args,
-        compute_metrics=compute_metrics_fn,
-        train_dataset=train_ds,
-        eval_dataset=eval_ds,
-        data_collator=data_collator,
-        callbacks=[_MLflowEpochCallback(), _CancellationCallback(stop_event)],
-        **extra_kwargs,
-    )
+        TrainerClass, extra_kwargs = _get_trainer_class(tipo)
+        trainer = TrainerClass(
+            model=model,
+            args=training_args,
+            compute_metrics=compute_metrics_fn,
+            train_dataset=train_ds,
+            eval_dataset=eval_ds,
+            data_collator=data_collator,
+            callbacks=[_MLflowEpochCallback(), _CancellationCallback(stop_event)],
+            **extra_kwargs,
+        )
 
-    logger.info('Entrenamiento simple: %d train / %d eval', len(train_ds), len(eval_ds))
-    train_result = trainer.train()
-    trainer.save_model(output_dir)
-    if hasattr(processor, 'save_pretrained'):
-        processor.save_pretrained(output_dir)
+        logger.info('Entrenamiento simple: %d train / %d eval', len(train_ds), len(eval_ds))
+        train_result = trainer.train()
+        trainer.save_model(output_dir)
+        if hasattr(processor, 'save_pretrained'):
+            processor.save_pretrained(output_dir)
 
-    eval_results = trainer.evaluate()
+        eval_results = trainer.evaluate()
 
-    return {
-        'train_loss': round(train_result.training_loss, 4),
-        'eval_loss': round(eval_results.get('eval_loss', 0.0), 4),
-        'eval_wer': round(eval_results.get('eval_wer', 1.0), 4),
-        'eval_cer': round(eval_results.get('eval_cer', 1.0), 4),
-        'total_steps': train_result.global_step,
-        'epochs': training_args.num_train_epochs,
-        'runtime_segundos': round(eval_results.get('eval_runtime', 0.0), 1),
-        'estrategia': 'split_simple',
-    }, output_dir
+        return {
+            'train_loss': round(train_result.training_loss, 4),
+            'eval_loss': round(eval_results.get('eval_loss', 0.0), 4),
+            'eval_wer': round(eval_results.get('eval_wer', 1.0), 4),
+            'eval_cer': round(eval_results.get('eval_cer', 1.0), 4),
+            'total_steps': train_result.global_step,
+            'epochs': training_args.num_train_epochs,
+            'runtime_segundos': round(eval_results.get('eval_runtime', 0.0), 1),
+            'estrategia': 'split_simple',
+        }, output_dir
+    finally:
+        _release_training_objects(trainer, model, processor, data_collator, train_ds, eval_ds)
 
 
 # ==================================================================
@@ -378,6 +474,8 @@ def _run_cross_validation(exp, samples, config, tipo, modelo_hf, ruta_local,
             f'fold_{fold_idx}_train': len(fold_samples_train),
             f'fold_{fold_idx}_eval': len(fold_samples_eval),
         })
+
+        model = processor = train_ds = eval_ds = data_collator = trainer = None
 
         # Cargar modelo fresco para cada fold
         model, processor = _load_model_for_training(
@@ -439,6 +537,8 @@ def _run_cross_validation(exp, samples, config, tipo, modelo_hf, ruta_local,
         if fold_wer < best_wer:
             best_wer = fold_wer
             best_fold_dir = fold_dir
+
+        _release_training_objects(trainer, model, processor, data_collator, train_ds, eval_ds)
 
     # --- Métricas agregadas ---
     wers = [m['eval_wer'] for m in fold_metrics]
@@ -539,6 +639,7 @@ def _load_model_for_training(tipo: str, modelo_hf: str, ruta_local: str,
         task = config.get('whisper_task', 'transcribe')
         processor = WhisperProcessor.from_pretrained(src, language=language, task=task)
         model = WhisperForConditionalGeneration.from_pretrained(src)
+        model.config.use_cache = False
         model.generation_config.language = language
         model.generation_config.task = task
         model.generation_config.forced_decoder_ids = None

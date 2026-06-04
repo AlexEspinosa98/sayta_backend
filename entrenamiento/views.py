@@ -3,6 +3,7 @@ Módulo de entrenamiento de modelos ASR para lenguas indígenas.
 
 Endpoints:
   GET  /api/entrenamiento/sistema/                         Recursos del servidor (CPU, GPU, RAM)
+  POST /api/entrenamiento/sistema/liberar-memoria/          Libera modelos cacheados y caché CUDA
   GET  /api/entrenamiento/modelos-disponibles/             Catálogo curado de modelos HF
   GET  /api/entrenamiento/modelos/                         Modelos descargados
   POST /api/entrenamiento/modelos/descargar/               Descarga un modelo desde HF Hub
@@ -394,8 +395,8 @@ class EntrenarView(APIView):
             '**Config opcionales:**\n'
             '- `num_train_epochs` (int, default 20)\n'
             '- `learning_rate` (float, default 1e-4 para wav2vec2 / 1e-5 para whisper)\n'
-            '- `per_device_train_batch_size` (int, default 4)\n'
-            '- `gradient_accumulation_steps` (int, default 2)\n'
+            '- `per_device_train_batch_size` (int, default 1 para whisper / 4 para wav2vec2)\n'
+            '- `gradient_accumulation_steps` (int, default 8 para whisper / 2 para wav2vec2)\n'
             '- `warmup_steps` (int, default 100)\n'
             '- `use_peft` (bool, default false) — LoRA para fine-tuning eficiente\n'
             '- `peft_r` (int, default 16)\n'
@@ -485,15 +486,20 @@ class EntrenarView(APIView):
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
 
-        # Verificar que ya no haya un entrenamiento activo para esta lengua y modelo
+        # Verificar que no haya otro entrenamiento activo compitiendo por GPU/RAM
         entrenando = ExperimentoEntrenamiento.objects.filter(
-            lengua=lengua,
-            modelo_base=modelo_audio,
             estado=ExperimentoEntrenamiento.ESTADO_ENTRENANDO,
-        ).exists()
+        ).select_related('lengua', 'modelo_base').first()
         if entrenando:
             return Response(
-                {'error': 'Ya hay un entrenamiento en curso para esta lengua y modelo.'},
+                {
+                    'error': 'Ya hay un entrenamiento en curso. Espera a que termine o cancélalo antes de iniciar otro.',
+                    'experimento_id': str(entrenando.id),
+                    'nombre': entrenando.nombre,
+                    'lengua': entrenando.lengua.codigo,
+                    'modelo': entrenando.modelo_base.nombre_hf,
+                    'estado_url': f'/api/entrenamiento/experimentos/{entrenando.id}/estado/',
+                },
                 status=status.HTTP_409_CONFLICT,
             )
 
@@ -1108,6 +1114,31 @@ class SistemaView(APIView):
             'sistema_operativo': platform.system(),
             'entrenamiento_en_curso': entrenamiento_activo,
             'advertencias': advertencias,
+        })
+
+
+class SistemaLiberarMemoriaView(APIView):
+    @extend_schema(
+        tags=['Entrenamiento — Sistema'],
+        summary='Liberar modelos cacheados y caché CUDA del servidor',
+        description=(
+            'Descarga de memoria los modelos ASR cacheados para transcripción y '
+            'vacía la caché CUDA retenida por PyTorch en este proceso. Úsalo antes '
+            'de lanzar entrenamiento si hubo transcripciones o entrenamientos previos.'
+        ),
+        responses={200: OpenApiResponse(description='Memoria liberada')},
+    )
+    def post(self, request):
+        cache_before = model_service.cache_info()
+        released_models = model_service.clear_model_cache()
+        torch_cleanup = training_service.cleanup_torch_memory()
+
+        return Response({
+            'mensaje': 'Memoria de modelos liberada.',
+            'modelos_cacheados_liberados': released_models,
+            'cache_antes': cache_before,
+            'cache_despues': model_service.cache_info(),
+            'torch': torch_cleanup,
         })
 
 
