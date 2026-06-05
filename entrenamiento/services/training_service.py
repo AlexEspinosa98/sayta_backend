@@ -49,6 +49,7 @@ os.environ.setdefault('PYTORCH_ALLOC_CONF', 'expandable_segments:True')
 os.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
 os.environ.setdefault('NCCL_P2P_DISABLE', '1')
 os.environ.setdefault('NCCL_IB_DISABLE', '1')
+os.environ.setdefault('CUDA_VISIBLE_DEVICES', '0')
 
 _active_tasks: Dict[str, Dict] = {}
 _stop_events: Dict[str, threading.Event] = {}  # task_id → Event para cancelación
@@ -1181,21 +1182,24 @@ def _apply_peft(model, tipo: str, config: Dict):
         logger.warning('peft no instalado, se omite LoRA. Instala con: pip install peft')
         return model
 
-    task_type = TaskType.SEQ_2_SEQ_LM
     target_modules = (
         ['q_proj', 'v_proj']
         if tipo == 'whisper'
         else ['k_proj', 'v_proj', 'q_proj', 'out_proj']
     )
 
-    lora_config = LoraConfig(
+    lora_kwargs = dict(
         r=config.get('peft_r', 16),
         lora_alpha=config.get('peft_alpha', 32),
         target_modules=target_modules,
         lora_dropout=config.get('peft_dropout', 0.05),
         bias='none',
-        task_type=task_type,
     )
+
+    if tipo != 'whisper':
+        lora_kwargs['task_type'] = TaskType.SEQ_2_SEQ_LM
+
+    lora_config = LoraConfig(**lora_kwargs)
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
     return model
