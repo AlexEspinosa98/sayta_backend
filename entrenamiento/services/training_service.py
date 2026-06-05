@@ -46,6 +46,9 @@ from typing import Any, Dict, List, Optional, Tuple, Union  # noqa: F401
 logger = logging.getLogger(__name__)
 
 os.environ.setdefault('PYTORCH_ALLOC_CONF', 'expandable_segments:True')
+os.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
+os.environ.setdefault('NCCL_P2P_DISABLE', '1')
+os.environ.setdefault('NCCL_IB_DISABLE', '1')
 
 _active_tasks: Dict[str, Dict] = {}
 _stop_events: Dict[str, threading.Event] = {}  # task_id → Event para cancelación
@@ -58,6 +61,7 @@ _tasks_lock = threading.Lock()
 
 def launch_training(experimento_id: str, samples: List[Dict], config: Dict) -> str:
     """Lanza el entrenamiento en un hilo daemon. Retorna task_id."""
+    _force_single_process_training_env()
     task_id = str(uuid.uuid4())
     stop_event = threading.Event()
     t = threading.Thread(
@@ -94,6 +98,32 @@ def request_cancellation(task_id: str) -> bool:
         return False
 
 
+def _force_single_process_training_env() -> None:
+    """
+    El backend entrena desde un proceso Django, no desde torchrun/accelerate launch.
+    Si el contenedor hereda variables distribuidas, Transformers puede intentar usar
+    NCCL aunque solo haya una GPU útil.
+    """
+    for key in (
+        'LOCAL_RANK',
+        'RANK',
+        'GROUP_RANK',
+        'ROLE_RANK',
+        'ROLE_NAME',
+        'LOCAL_WORLD_SIZE',
+        'WORLD_SIZE',
+        'GROUP_WORLD_SIZE',
+        'ROLE_WORLD_SIZE',
+        'MASTER_ADDR',
+        'MASTER_PORT',
+        'TORCHELASTIC_RUN_ID',
+        'TORCHELASTIC_RESTART_COUNT',
+        'TORCHELASTIC_MAX_RESTARTS',
+        'TORCHELASTIC_ERROR_FILE',
+    ):
+        os.environ.pop(key, None)
+
+
 def cleanup_torch_memory() -> Dict[str, Any]:
     """Libera caché CUDA/PyTorch retenida por este proceso."""
     gc.collect()
@@ -103,6 +133,13 @@ def cleanup_torch_memory() -> Dict[str, Any]:
         import torch
     except ImportError:
         return info
+
+    try:
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
+            info['distributed_destroyed'] = True
+    except Exception:
+        logger.debug('No se pudo destruir process group distribuido', exc_info=True)
 
     info['cuda_disponible'] = torch.cuda.is_available()
     if not torch.cuda.is_available():
@@ -240,6 +277,7 @@ def _run_training(exp, samples: List[Dict], config: Dict, task_id: str,
     Ejecuta el fine-tuning completo. Retorna
     (metricas, output_dir, mlflow_run_id, mlflow_exp_id, mlflow_exp_name, tracking_uri).
     """
+    _force_single_process_training_env()
     _check_deps()
 
     import mlflow
@@ -251,6 +289,11 @@ def _run_training(exp, samples: List[Dict], config: Dict, task_id: str,
     tipo = exp.modelo_base.tipo
     modelo_hf = exp.modelo_base.nombre_hf
     ruta_local = exp.modelo_base.ruta_local
+    config = _normalize_runtime_training_config(tipo, modelo_hf, config)
+
+    if exp.config_entrenamiento != config:
+        exp.config_entrenamiento = config
+        exp.save(update_fields=['config_entrenamiento'])
 
     # --- MLflow setup ---
     tracking_uri = config.get(
@@ -293,9 +336,9 @@ def _run_training(exp, samples: List[Dict], config: Dict, task_id: str,
             'seleccion': comunidades_str,
             'num_muestras_total': len(samples),
             'epochs': config.get('num_train_epochs', 20),
-            'learning_rate': config.get('learning_rate', 1e-4),
-            'batch_size': config.get('per_device_train_batch_size', 4),
-            'gradient_accumulation': config.get('gradient_accumulation_steps', 2),
+            'learning_rate': config.get('learning_rate', 1e-5 if tipo == 'whisper' else 1e-4),
+            'batch_size': config.get('per_device_train_batch_size', 1 if tipo == 'whisper' else 4),
+            'gradient_accumulation': config.get('gradient_accumulation_steps', 8 if tipo == 'whisper' else 2),
             'warmup_steps': config.get('warmup_steps', 100),
             'weight_decay': config.get('weight_decay', 0.005),
             'use_peft': config.get('use_peft', False),
@@ -330,6 +373,46 @@ def _run_training(exp, samples: List[Dict], config: Dict, task_id: str,
         logger.info('Métricas finales: %s', metricas)
 
     return metricas, output_dir, run_id, exp_mlflow_id, experiment_name, tracking_uri
+
+
+def _normalize_runtime_training_config(tipo: str, modelo_hf: str, config: Dict) -> Dict:
+    normalized = dict(config or {})
+
+    if tipo != 'whisper':
+        return normalized
+
+    model_name = (modelo_hf or '').lower()
+    is_memory_sensitive = 'whisper-small' in model_name or 'whisper-medium' in model_name
+    if not is_memory_sensitive or normalized.get('allow_full_finetune', False):
+        return normalized
+
+    safe_values = {
+        'per_device_train_batch_size': 1,
+        'per_device_eval_batch_size': 1,
+        'gradient_accumulation_steps': max(int(normalized.get('gradient_accumulation_steps', 8)), 8),
+        'gradient_checkpointing': True,
+        'fp16': True,
+        'use_peft': True,
+        'peft_r': int(normalized.get('peft_r', 8)),
+        'peft_alpha': int(normalized.get('peft_alpha', 16)),
+        'clear_asr_cache_before_training': True,
+    }
+
+    changed = {}
+    for key, value in safe_values.items():
+        previous = normalized.get(key)
+        if previous != value:
+            normalized[key] = value
+            changed[key] = {'antes': previous, 'despues': value}
+
+    if changed:
+        logger.warning(
+            'Config de entrenamiento ajustada para %s por límite de VRAM: %s',
+            modelo_hf,
+            changed,
+        )
+
+    return normalized
 
 
 def _prepare_memory_for_training(config: Dict) -> None:
@@ -1036,12 +1119,20 @@ def _build_training_args(tipo: str, output_dir: str, config: Dict, fp16: bool):
     # Defaults conservadores para GPU de 8 GB (batch=1 + grad_accum=8 = efectivo 8)
     default_batch = 1 if tipo == 'whisper' else 4
     default_grad_accum = 8 if tipo == 'whisper' else 2
+    train_batch_size = int(config.get('per_device_train_batch_size', default_batch))
+    eval_batch_size = int(config.get('per_device_eval_batch_size', default_batch))
+    grad_accum = int(config.get('gradient_accumulation_steps', default_grad_accum))
+
+    if tipo == 'whisper':
+        train_batch_size = min(train_batch_size, 1)
+        eval_batch_size = min(eval_batch_size, 1)
+        grad_accum = max(grad_accum, 8)
 
     common = {
         'output_dir': output_dir,
-        'per_device_train_batch_size': config.get('per_device_train_batch_size', default_batch),
-        'per_device_eval_batch_size': config.get('per_device_eval_batch_size', default_batch),
-        'gradient_accumulation_steps': config.get('gradient_accumulation_steps', default_grad_accum),
+        'per_device_train_batch_size': train_batch_size,
+        'per_device_eval_batch_size': eval_batch_size,
+        'gradient_accumulation_steps': grad_accum,
         'learning_rate': config.get('learning_rate', 1e-5 if tipo == 'whisper' else 1e-4),
         'warmup_steps': config.get('warmup_steps', 100),
         'num_train_epochs': config.get('num_train_epochs', 20),

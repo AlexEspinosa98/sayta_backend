@@ -486,6 +486,8 @@ class EntrenarView(APIView):
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
 
+        config, config_warnings = _normalize_training_config(modelo_audio, data.get('config', {}))
+
         # Verificar que no haya otro entrenamiento activo compitiendo por GPU/RAM
         entrenando = ExperimentoEntrenamiento.objects.filter(
             estado=ExperimentoEntrenamiento.ESTADO_ENTRENANDO,
@@ -538,7 +540,7 @@ class EntrenarView(APIView):
             lengua=lengua,
             modelo_base=modelo_audio,
             comunidades_usadas=seleccion_info,
-            config_entrenamiento=data.get('config', {}),
+            config_entrenamiento=config,
             estado=ExperimentoEntrenamiento.ESTADO_PENDIENTE,
         )
 
@@ -546,7 +548,7 @@ class EntrenarView(APIView):
         task_id = training_service.launch_training(
             experimento_id=str(exp.id),
             samples=samples,
-            config=data.get('config', {}),
+            config=config,
         )
         exp.task_id = task_id
         exp.save(update_fields=['task_id'])
@@ -557,6 +559,8 @@ class EntrenarView(APIView):
                 'experimento_id': str(exp.id),
                 'task_id': task_id,
                 'num_muestras': len(samples),
+                'config_usada': config,
+                'advertencias_config': config_warnings,
                 'estado_url': f'/api/entrenamiento/experimentos/{exp.id}/estado/',
             },
             status=status.HTTP_202_ACCEPTED,
@@ -1145,6 +1149,46 @@ class SistemaLiberarMemoriaView(APIView):
 # ======================================================================
 # Helper
 # ======================================================================
+
+def _normalize_training_config(modelo_audio: ModeloAudio, config: dict) -> tuple[dict, list[str]]:
+    normalized = dict(config or {})
+    warnings = []
+
+    if modelo_audio.tipo != ModeloAudio.TIPO_WHISPER:
+        return normalized, warnings
+
+    model_name = modelo_audio.nombre_hf.lower()
+    is_memory_sensitive = 'whisper-small' in model_name or 'whisper-medium' in model_name
+    if not is_memory_sensitive:
+        return normalized, warnings
+
+    if normalized.get('allow_full_finetune', False):
+        warnings.append(
+            'allow_full_finetune=true: se conserva la configuración solicitada, '
+            'pero Whisper Small/Medium puede fallar en GPU de 8 GB.'
+        )
+        return normalized, warnings
+
+    desired = {
+        'per_device_train_batch_size': 1,
+        'per_device_eval_batch_size': 1,
+        'gradient_accumulation_steps': max(int(normalized.get('gradient_accumulation_steps', 8)), 8),
+        'gradient_checkpointing': True,
+        'fp16': True,
+        'use_peft': True,
+        'peft_r': int(normalized.get('peft_r', 8)),
+        'peft_alpha': int(normalized.get('peft_alpha', 16)),
+        'clear_asr_cache_before_training': True,
+    }
+
+    for key, value in desired.items():
+        previous = normalized.get(key)
+        if previous != value:
+            normalized[key] = value
+            warnings.append(f'{key} ajustado de {previous!r} a {value!r} para evitar OOM/NCCL en GPU de 8 GB.')
+
+    return normalized, warnings
+
 
 def _get_active_experiment(lengua_id: int):
     """Retorna (ExperimentoEntrenamiento activo, None) o (None, Response de error)."""
