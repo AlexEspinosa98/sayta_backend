@@ -29,7 +29,7 @@ from rest_framework import filters, mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import JSONParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from usuarios.permissions import EsInvestigador
@@ -102,7 +102,9 @@ class LenguaViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
-            return [IsAuthenticated()]
+            # Lectura pública: el Home (ruta pública) necesita listar las
+            # lenguas sin login para poblar el selector del traductor.
+            return [AllowAny()]
         return [EsInvestigador()]
 
 
