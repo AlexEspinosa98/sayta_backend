@@ -23,6 +23,7 @@ urlpatterns = [
     path('', include('health.urls')),
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('api/auth/', include('usuarios.urls')),
     path('api/', include('translator_api.urls')),
     path('api/terminos/', include('terminos.urls')),
     path('api/traduccion/', include('traduccion.urls')),

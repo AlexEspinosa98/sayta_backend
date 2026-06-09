@@ -33,10 +33,12 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     # Terceros
     'rest_framework',
+    'rest_framework.authtoken',
     'django_filters',
     'drf_spectacular',
     # Propias
     'health',
+    'usuarios',
     'translator_api',
     'terminos',
     'traduccion',
@@ -104,6 +106,12 @@ else:
 # ---------------------------------------------------------------------------
 
 REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.TokenAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
     'DEFAULT_FILTER_BACKENDS': [
@@ -121,8 +129,14 @@ REST_FRAMEWORK = {
 }
 
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'Sayta — API de Términos y Embeddings',
+    'TITLE': 'Sayta — API de Lenguas Indígenas',
+    'SECURITY': [{'TokenAuth': []}],
     'DESCRIPTION': (
+        '## Autenticación\n\n'
+        'Todos los endpoints (salvo `/api/auth/login/`) requieren el header:\n\n'
+        '```\nAuthorization: Token <tu-token>\n```\n\n'
+        'Obtén el token con `POST /api/auth/login/`.\n\n'
+        '---\n\n'
         'API REST para gestionar diccionarios de lenguas indígenas colombianas.\n\n'
         '**Flujo recomendado:**\n'
         '1. Crear lengua → `POST /api/terminos/lenguas/`\n'
@@ -135,7 +149,19 @@ SPECTACULAR_SETTINGS = {
     'SERVE_INCLUDE_SCHEMA': False,
     'COMPONENT_SPLIT_REQUEST': True,
     'SORT_OPERATIONS': False,
+    'COMPONENTS': {
+        'securitySchemes': {
+            'TokenAuth': {
+                'type': 'apiKey',
+                'in': 'header',
+                'name': 'Authorization',
+                'description': 'Token de acceso. Formato: **Token &lt;tu-token&gt;**',
+            }
+        }
+    },
     'TAGS': [
+        {'name': 'Auth', 'description': 'Login, logout y perfil propio'},
+        {'name': 'Auth — Administración', 'description': 'Registro y gestión de usuarios (solo admin)'},
         {'name': 'Lenguas', 'description': 'Gestión de lenguas indígenas registradas'},
         {'name': 'Términos ES', 'description': 'Términos en español (entradas del diccionario)'},
         {'name': 'Términos Lengua', 'description': 'Términos en lengua indígena con definición'},

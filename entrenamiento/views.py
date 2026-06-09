@@ -8,6 +8,7 @@ Endpoints:
   GET  /api/entrenamiento/modelos/                         Modelos descargados
   POST /api/entrenamiento/modelos/descargar/               Descarga un modelo desde HF Hub
   GET  /api/entrenamiento/dataset/                         Stats de datos etiquetados por comunidad
+  GET  /api/entrenamiento/dataset/estadisticas/            Tiempo de grabación y cantidad de archivos por comunidad
   GET  /api/entrenamiento/dataset/<community>/             Stats detallados de una comunidad
   POST /api/entrenamiento/entrenar/                        Lanza fine-tuning (asíncrono)
   GET  /api/entrenamiento/experimentos/                    Lista experimentos
@@ -29,6 +30,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from usuarios.permissions import EsAnotador, EsInvestigador
 from .models import ExperimentoEntrenamiento, ModeloAudio
 from .serializers import (
     EntrenarRequestSerializer,
@@ -93,6 +95,8 @@ class ModeloListView(APIView):
 
 
 class ModeloDescargarView(APIView):
+    permission_classes = [EsInvestigador]
+
     @extend_schema(
         tags=['Entrenamiento — Modelos'],
         summary='Descargar un modelo desde HuggingFace Hub',
@@ -217,6 +221,7 @@ class DatasetComunidadView(APIView):
 
 class SubirAudioView(APIView):
     parser_classes = [MultiPartParser, FormParser]
+    permission_classes = [EsAnotador]
 
     @extend_schema(
         tags=['Entrenamiento — Dataset'],
@@ -289,6 +294,59 @@ class SubirAudioView(APIView):
             {'mensaje': 'Audio guardado exitosamente.', **resultado},
             status=status.HTTP_201_CREATED,
         )
+
+
+class EstadisticasGrabacionesView(APIView):
+    @extend_schema(
+        tags=['Entrenamiento — Dataset'],
+        summary='Estadísticas de tiempo de grabación por comunidad',
+        description=(
+            'Escanea todos los archivos de audio en disco y calcula el tiempo total '
+            'de grabación y la cantidad de archivos, desglosados por comunidad y jornada.\n\n'
+            'La duración se extrae de los metadatos del audio (no se decodifica el contenido). '
+            'Si un archivo no puede ser leído, se cuenta en `archivos_sin_duracion`.'
+        ),
+        responses={200: OpenApiResponse(description='Estadísticas de tiempo de grabación')},
+        examples=[
+            OpenApiExample(
+                'Respuesta exitosa',
+                value={
+                    'base_path': '/mnt/sayta_data/data/Grabaciones',
+                    'existe': True,
+                    'resumen_global': {
+                        'total_comunidades': 2,
+                        'total_archivos': 150,
+                        'duracion_segundos': 3600.0,
+                        'duracion_formateada': '1h 00m 00s',
+                        'archivos_sin_duracion': 0,
+                    },
+                    'por_comunidad': [
+                        {
+                            'comunidad': 'arhuaco',
+                            'total_archivos': 90,
+                            'duracion_segundos': 2160.0,
+                            'duracion_formateada': '36m 00s',
+                            'archivos_sin_duracion': 0,
+                            'jornadas': [
+                                {
+                                    'jornada': 'grabacion_junio_2026',
+                                    'total_archivos': 30,
+                                    'duracion_segundos': 720.0,
+                                    'duracion_formateada': '12m 00s',
+                                    'archivos_sin_duracion': 0,
+                                }
+                            ],
+                        }
+                    ],
+                },
+                response_only=True,
+                status_codes=['200'],
+            ),
+        ],
+    )
+    def get(self, request):
+        stats = dataset_service.get_recording_time_stats()
+        return Response(stats)
 
 
 class DatasetSesionesView(APIView):
@@ -377,6 +435,8 @@ class LenguasEntrenamientoView(APIView):
 # ======================================================================
 
 class EntrenarView(APIView):
+    permission_classes = [EsInvestigador]
+
     @extend_schema(
         tags=['Entrenamiento — Experimentos'],
         summary='Lanzar fine-tuning de un modelo ASR (asíncrono)',
@@ -646,6 +706,8 @@ class ExperimentoEstadoView(APIView):
 
 
 class ExperimentoCancelarView(APIView):
+    permission_classes = [EsInvestigador]
+
     @extend_schema(
         tags=['Entrenamiento — Experimentos'],
         summary='Cancelar un entrenamiento en curso',
@@ -696,6 +758,8 @@ class ExperimentoCancelarView(APIView):
 
 
 class ExperimentoActivarView(APIView):
+    permission_classes = [EsInvestigador]
+
     @extend_schema(
         tags=['Entrenamiento — Experimentos'],
         summary='Activar un modelo entrenado para su lengua',
@@ -1122,6 +1186,8 @@ class SistemaView(APIView):
 
 
 class SistemaLiberarMemoriaView(APIView):
+    permission_classes = [EsInvestigador]
+
     @extend_schema(
         tags=['Entrenamiento — Sistema'],
         summary='Liberar modelos cacheados y caché CUDA del servidor',

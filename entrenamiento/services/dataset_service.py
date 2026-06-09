@@ -289,6 +289,133 @@ def build_samples(community_names: List[str]) -> List[Dict]:
 
 
 # ------------------------------------------------------------------
+# Estadísticas de tiempo de grabación
+# ------------------------------------------------------------------
+
+def _audio_duration(path: Path) -> Optional[float]:
+    """Retorna duración en segundos del archivo de audio, o None si falla."""
+    try:
+        import soundfile as sf
+        return sf.info(str(path)).duration
+    except Exception:
+        pass
+    try:
+        import librosa
+        return librosa.get_duration(path=str(path))
+    except Exception:
+        pass
+    try:
+        from mutagen import File as MutagenFile
+        f = MutagenFile(str(path))
+        if f is not None and f.info is not None:
+            return f.info.length
+    except Exception:
+        pass
+    return None
+
+
+def _format_duration(seconds: float) -> str:
+    total = int(seconds)
+    horas = total // 3600
+    minutos = (total % 3600) // 60
+    segs = total % 60
+    if horas > 0:
+        return f'{horas}h {minutos:02d}m {segs:02d}s'
+    return f'{minutos}m {segs:02d}s'
+
+
+def get_recording_time_stats() -> Dict:
+    """
+    Escanea todas las grabaciones y retorna estadísticas de tiempo y cantidad
+    de archivos de audio por comunidad y en total.
+    """
+    base = _grabaciones_base()
+    if not base.exists():
+        return {
+            'base_path': str(base),
+            'existe': False,
+            'advertencia': 'Directorio de grabaciones no encontrado.',
+        }
+
+    comunidades_data = []
+    total_archivos_global = 0
+    total_duracion_global = 0.0
+    archivos_sin_duracion_global = 0
+
+    for community_dir in sorted(base.iterdir()):
+        if not community_dir.is_dir():
+            continue
+
+        jornadas_data = []
+        total_archivos_comunidad = 0
+        total_duracion_comunidad = 0.0
+        archivos_sin_duracion_comunidad = 0
+
+        for session_dir in sorted(community_dir.iterdir()):
+            if not session_dir.is_dir():
+                continue
+            audios_dir = session_dir / 'audios_sin_procesar'
+            if not audios_dir.exists():
+                continue
+
+            archivos_jornada = 0
+            duracion_jornada = 0.0
+            sin_duracion_jornada = 0
+
+            for f in sorted(audios_dir.iterdir()):
+                if not f.is_file() or f.suffix.lower() not in AUDIO_EXTENSIONS:
+                    continue
+                archivos_jornada += 1
+                dur = _audio_duration(f)
+                if dur is not None:
+                    duracion_jornada += dur
+                else:
+                    sin_duracion_jornada += 1
+
+            if archivos_jornada == 0:
+                continue
+
+            jornadas_data.append({
+                'jornada': session_dir.name,
+                'total_archivos': archivos_jornada,
+                'duracion_segundos': round(duracion_jornada, 2),
+                'duracion_formateada': _format_duration(duracion_jornada),
+                'archivos_sin_duracion': sin_duracion_jornada,
+            })
+            total_archivos_comunidad += archivos_jornada
+            total_duracion_comunidad += duracion_jornada
+            archivos_sin_duracion_comunidad += sin_duracion_jornada
+
+        if total_archivos_comunidad == 0:
+            continue
+
+        comunidades_data.append({
+            'comunidad': community_dir.name,
+            'total_archivos': total_archivos_comunidad,
+            'duracion_segundos': round(total_duracion_comunidad, 2),
+            'duracion_formateada': _format_duration(total_duracion_comunidad),
+            'archivos_sin_duracion': archivos_sin_duracion_comunidad,
+            'jornadas': jornadas_data,
+        })
+        total_archivos_global += total_archivos_comunidad
+        total_duracion_global += total_duracion_comunidad
+        archivos_sin_duracion_global += archivos_sin_duracion_comunidad
+
+    return {
+        'base_path': str(base),
+        'existe': True,
+        'resumen_global': {
+            'total_comunidades': len(comunidades_data),
+            'total_archivos': total_archivos_global,
+            'duracion_segundos': round(total_duracion_global, 2),
+            'duracion_formateada': _format_duration(total_duracion_global),
+            'archivos_sin_duracion': archivos_sin_duracion_global,
+        },
+        'por_comunidad': comunidades_data,
+    }
+
+
+# ------------------------------------------------------------------
 # Subida de audios al dataset
 # ------------------------------------------------------------------
 
