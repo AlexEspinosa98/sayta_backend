@@ -1,0 +1,38 @@
+# Control de versiones
+.git/
+.gitignore
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# IDE y editores
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Variables de entorno locales
+.env
+.env.*
+
+# Datos de desarrollo/procesamiento (no necesarios en producción)
+Ette_traductor_NPL-main/
+
+# SQLite de desarrollo (se usa volumen persistente)
+db.sqlite3
+
+# Logs
+*.log
+logs/
