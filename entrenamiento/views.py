@@ -95,7 +95,6 @@ class ModeloListView(APIView):
 
 
 class ModeloDescargarView(APIView):
-    permission_classes = [EsInvestigador]
 
     @extend_schema(
         tags=['Entrenamiento — Modelos'],
@@ -221,7 +220,6 @@ class DatasetComunidadView(APIView):
 
 class SubirAudioView(APIView):
     parser_classes = [MultiPartParser, FormParser]
-    permission_classes = [EsAnotador]
 
     @extend_schema(
         tags=['Entrenamiento — Dataset'],
@@ -524,7 +522,6 @@ class LenguasEntrenamientoView(APIView):
 # ======================================================================
 
 class EntrenarView(APIView):
-    permission_classes = [EsInvestigador]
 
     @extend_schema(
         tags=['Entrenamiento — Experimentos'],
@@ -799,7 +796,6 @@ class ExperimentoEstadoView(APIView):
 
 
 class ExperimentoCancelarView(APIView):
-    permission_classes = [EsInvestigador]
 
     @extend_schema(
         tags=['Entrenamiento — Experimentos'],
@@ -851,7 +847,6 @@ class ExperimentoCancelarView(APIView):
 
 
 class ExperimentoActivarView(APIView):
-    permission_classes = [EsInvestigador]
 
     @extend_schema(
         tags=['Entrenamiento — Experimentos'],
@@ -1279,7 +1274,6 @@ class SistemaView(APIView):
 
 
 class SistemaLiberarMemoriaView(APIView):
-    permission_classes = [EsInvestigador]
 
     @extend_schema(
         tags=['Entrenamiento — Sistema'],
