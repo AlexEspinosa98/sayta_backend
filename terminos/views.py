@@ -100,10 +100,6 @@ class LenguaViewSet(viewsets.ModelViewSet):
     ordering_fields = ['nombre', 'codigo', 'created_at']
     ordering = ['nombre']
 
-    def get_permissions(self):
-        if self.action in ('list', 'retrieve'):
-            return [IsAuthenticated()]
-        return [EsInvestigador()]
 
 
 # ---------------------------------------------------------------------------
@@ -140,10 +136,6 @@ class TerminoEsViewSet(viewsets.ModelViewSet):
     ordering_fields = ['termino', 'created_at']
     ordering = ['termino']
 
-    def get_permissions(self):
-        if self.action in ('list', 'retrieve'):
-            return [IsAuthenticated()]
-        return [EsInvestigador()]
 
 
 # ---------------------------------------------------------------------------
@@ -208,11 +200,6 @@ class TerminoLengViewSet(viewsets.ModelViewSet):
     search_fields = ['termino', 'definicion']
     ordering_fields = ['termino', 'created_at', 'updated_at']
     ordering = ['termino']
-
-    def get_permissions(self):
-        if self.action in ('list', 'retrieve'):
-            return [IsAuthenticated()]
-        return [EsInvestigador()]
 
     def get_serializer_class(self):
         if self.action in ('create', 'update', 'partial_update'):
@@ -533,11 +520,6 @@ class EmbeddingVersionViewSet(
     filterset_fields = ['lengua', 'status', 'is_active']
     ordering_fields = ['created_at', 'completed_at', 'num_terminos']
     ordering = ['-created_at']
-
-    def get_permissions(self):
-        if self.action in ('list', 'retrieve', 'estado'):
-            return [IsAuthenticated()]
-        return [EsInvestigador()]
 
     @extend_schema(
         tags=['Embeddings'],
