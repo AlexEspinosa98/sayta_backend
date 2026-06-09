@@ -50,6 +50,141 @@ class ExperimentoDetailSerializer(serializers.ModelSerializer):
         ]
 
 
+# ── Data Augmentation ──────────────────────────────────────────────────────
+
+class _TecnicaBaseSerializer(serializers.Serializer):
+    habilitado = serializers.BooleanField(
+        default=False,
+        help_text='Activa esta técnica para el experimento.',
+    )
+    porcentaje = serializers.FloatField(
+        min_value=1.0,
+        max_value=100.0,
+        required=False,
+        help_text='Porcentaje de muestras de entrenamiento a las que se aplica esta técnica (1–100).',
+    )
+
+
+class RuidoGaussianoSerializer(_TecnicaBaseSerializer):
+    intensidad = serializers.FloatField(
+        min_value=0.001,
+        max_value=0.05,
+        required=False,
+        help_text='Amplitud del ruido relativa a la señal. 0.005 = sutil, 0.03 = notable.',
+    )
+
+
+class CambioVelocidadSerializer(_TecnicaBaseSerializer):
+    factor_min = serializers.FloatField(
+        min_value=0.7,
+        max_value=1.0,
+        required=False,
+        help_text='Factor mínimo de velocidad (0.9 = 10 %% más lento).',
+    )
+    factor_max = serializers.FloatField(
+        min_value=1.0,
+        max_value=1.3,
+        required=False,
+        help_text='Factor máximo de velocidad (1.1 = 10 %% más rápido).',
+    )
+
+
+class CambioTonoSerializer(_TecnicaBaseSerializer):
+    semitonos_min = serializers.IntegerField(
+        min_value=-6,
+        max_value=0,
+        required=False,
+        help_text='Semitonos mínimos a desplazar (negativo = más grave). Ej: -2.',
+    )
+    semitonos_max = serializers.IntegerField(
+        min_value=0,
+        max_value=6,
+        required=False,
+        help_text='Semitonos máximos a desplazar (positivo = más agudo). Ej: 2.',
+    )
+
+
+class ReduccionVolumenSerializer(_TecnicaBaseSerializer):
+    factor_min = serializers.FloatField(
+        min_value=0.2,
+        max_value=0.8,
+        required=False,
+        help_text='Factor mínimo de ganancia (0.5 = 50 %% del volumen original).',
+    )
+    factor_max = serializers.FloatField(
+        min_value=0.6,
+        max_value=1.0,
+        required=False,
+        help_text='Factor máximo de ganancia.',
+    )
+
+
+class RecorteTiempoSerializer(_TecnicaBaseSerializer):
+    max_porcentaje_clip = serializers.IntegerField(
+        min_value=5,
+        max_value=30,
+        required=False,
+        help_text='Porcentaje máximo del audio a silenciar (10 = hasta el 10 %% de la duración).',
+    )
+
+
+class EcoSerializer(_TecnicaBaseSerializer):
+    delay_ms = serializers.IntegerField(
+        min_value=10,
+        max_value=200,
+        required=False,
+        help_text='Retardo del eco en milisegundos. 30–80 ms = sala pequeña, 100–200 ms = espacio grande.',
+    )
+    decay = serializers.FloatField(
+        min_value=0.05,
+        max_value=0.5,
+        required=False,
+        help_text='Amplitud del eco relativa a la señal original (0.2 = 20 %%).',
+    )
+
+
+class TecnicasAugmentationSerializer(serializers.Serializer):
+    ruido_gaussiano = RuidoGaussianoSerializer(
+        required=False,
+        help_text='Ruido blanco gaussiano. Simula grabaciones con ruido ambiental.',
+    )
+    cambio_velocidad = CambioVelocidadSerializer(
+        required=False,
+        help_text='Time stretching sin cambio de tono. Simula variaciones en velocidad del hablante.',
+    )
+    cambio_tono = CambioTonoSerializer(
+        required=False,
+        help_text='Pitch shifting sin cambio de velocidad. Simula diferentes tipos de hablantes.',
+    )
+    reduccion_volumen = ReduccionVolumenSerializer(
+        required=False,
+        help_text='Reducción aleatoria de ganancia. Simula micrófono a mayor distancia.',
+    )
+    recorte_tiempo = RecorteTiempoSerializer(
+        required=False,
+        help_text='Enmascaramiento temporal (Time Masking). Regularización inspirada en SpecAugment.',
+    )
+    eco = EcoSerializer(
+        required=False,
+        help_text='Eco simple. Simula grabaciones en espacios con reverberación (maloca, aula).',
+    )
+
+
+class AugmentationSerializer(serializers.Serializer):
+    habilitado = serializers.BooleanField(
+        default=False,
+        help_text='Activa o desactiva el data augmentation para este experimento.',
+    )
+    tecnicas = TecnicasAugmentationSerializer(
+        required=False,
+        help_text=(
+            'Configuración de cada técnica. '
+            'Solo se aplican las que tengan `habilitado: true`. '
+            'Consulta GET /api/entrenamiento/dataset/augmentation/ para ver el catálogo completo.'
+        ),
+    )
+
+
 class SesionSerializer(serializers.Serializer):
     """Par (comunidad, jornada) para selección granular de datos."""
     comunidad = serializers.CharField(
@@ -104,6 +239,15 @@ class EntrenarRequestSerializer(serializers.Serializer):
             '  use_peft (bool, default false)\n'
             '  peft_r (int, default 16)\n'
             '  whisper_language (str, default "es")'
+        ),
+    )
+    augmentation = AugmentationSerializer(
+        required=False,
+        help_text=(
+            'Configuración de Data Augmentation. '
+            'Genera muestras adicionales a partir del dataset original para mejorar '
+            'la robustez del modelo. '
+            'Consulta GET /api/entrenamiento/dataset/augmentation/ para el catálogo de técnicas.'
         ),
     )
 

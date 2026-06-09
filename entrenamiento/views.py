@@ -42,7 +42,7 @@ from .serializers import (
     TranscribirTraducirRequestSerializer,
     SesionSerializer,
 )
-from .services import dataset_service, model_service, training_service
+from .services import augmentation_service, dataset_service, model_service, training_service
 
 logger = logging.getLogger(__name__)
 
@@ -296,6 +296,95 @@ class SubirAudioView(APIView):
         )
 
 
+class AugmentationCatalogoView(APIView):
+    @extend_schema(
+        tags=['Entrenamiento — Dataset'],
+        summary='Catálogo de técnicas de Data Augmentation disponibles',
+        description=(
+            'Devuelve todas las técnicas de aumento de datos disponibles con sus parámetros, '
+            'rangos, valores por defecto y un ejemplo de configuración listo para copiar '
+            'en el campo `augmentation` de `POST /api/entrenamiento/entrenar/`.\n\n'
+            '**¿Qué es Data Augmentation?**\n'
+            'Genera nuevas muestras de entrenamiento a partir de las existentes aplicando '
+            'transformaciones de audio (ruido, velocidad, tono, etc.), sin modificar los '
+            'archivos originales. Cada muestra aumentada hereda la transcripción del original.\n\n'
+            '**¿Cuándo usarlo?**\n'
+            'Especialmente útil cuando el dataset es pequeño (< 500 muestras). '
+            'Con un 30 % de ruido gaussiano sobre 100 muestras se obtienen 30 muestras extra, '
+            'totalizando 130 muestras de entrenamiento.\n\n'
+            '**Nota metodológica:** el augmentation se aplica ANTES del split train/eval, '
+            'por lo que el conjunto de evaluación puede contener muestras aumentadas. '
+            'Para un control más estricto, usa K-Fold (`use_cv: true`), donde la augmentation '
+            'se aplica por fold solo al split de entrenamiento.'
+        ),
+        responses={200: OpenApiResponse(description='Catálogo de técnicas con parámetros y ejemplos')},
+        examples=[
+            OpenApiExample(
+                'Respuesta parcial',
+                value={
+                    'total_tecnicas': 6,
+                    'tecnicas': {
+                        'ruido_gaussiano': {
+                            'nombre': 'Ruido Gaussiano',
+                            'recomendado': True,
+                            'porcentaje_default': 30,
+                            'impacto_tiempo': 'bajo',
+                            'config_ejemplo': {
+                                'habilitado': True,
+                                'porcentaje': 30,
+                                'intensidad': 0.005,
+                            },
+                        },
+                        'cambio_velocidad': {
+                            'nombre': 'Cambio de Velocidad (Time Stretching)',
+                            'recomendado': True,
+                            'porcentaje_default': 20,
+                            'impacto_tiempo': 'medio',
+                            'config_ejemplo': {
+                                'habilitado': True,
+                                'porcentaje': 20,
+                                'factor_min': 0.9,
+                                'factor_max': 1.1,
+                            },
+                        },
+                    },
+                    'ejemplo_completo_para_entrenar': {
+                        'habilitado': True,
+                        'tecnicas': {
+                            'ruido_gaussiano': {'habilitado': True, 'porcentaje': 30, 'intensidad': 0.005},
+                            'cambio_velocidad': {'habilitado': True, 'porcentaje': 20},
+                            'cambio_tono': {'habilitado': True, 'porcentaje': 20},
+                            'reduccion_volumen': {'habilitado': False},
+                            'recorte_tiempo': {'habilitado': False},
+                            'eco': {'habilitado': False},
+                        },
+                    },
+                },
+                response_only=True,
+                status_codes=['200'],
+            ),
+        ],
+    )
+    def get(self, request):
+        catalogo = augmentation_service.get_catalogo_completo()
+        tecnicas_recomendadas = [k for k, v in catalogo.items() if v.get('recomendado')]
+
+        ejemplo_completo = {
+            'habilitado': True,
+            'tecnicas': {
+                nombre: info['config_ejemplo']
+                for nombre, info in catalogo.items()
+            },
+        }
+
+        return Response({
+            'total_tecnicas': len(catalogo),
+            'tecnicas_recomendadas': tecnicas_recomendadas,
+            'tecnicas': catalogo,
+            'ejemplo_completo_para_entrenar': ejemplo_completo,
+        })
+
+
 class EstadisticasGrabacionesView(APIView):
     @extend_schema(
         tags=['Entrenamiento — Dataset'],
@@ -546,7 +635,11 @@ class EntrenarView(APIView):
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
 
-        config, config_warnings = _normalize_training_config(modelo_audio, data.get('config', {}))
+        raw_config = dict(data.get('config') or {})
+        aug_data = data.get('augmentation')
+        if aug_data:
+            raw_config['augmentation'] = aug_data
+        config, config_warnings = _normalize_training_config(modelo_audio, raw_config)
 
         # Verificar que no haya otro entrenamiento activo compitiendo por GPU/RAM
         entrenando = ExperimentoEntrenamiento.objects.filter(

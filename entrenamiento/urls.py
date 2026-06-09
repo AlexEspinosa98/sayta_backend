@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    AugmentationCatalogoView,
     DatasetComunidadView,
     DatasetEstadoView,
     DatasetSesionesView,
@@ -36,11 +37,13 @@ urlpatterns = [
     path('modelos/descargar/', ModeloDescargarView.as_view(), name='entrenamiento_modelos_descargar'),
 
     # Dataset — datos etiquetados
-    # IMPORTANTE: rutas fijas ('sesiones/', 'subir/', 'estadisticas/') deben ir ANTES del parámetro <str:community>/
+    # IMPORTANTE: rutas fijas ('sesiones/', 'subir/', 'estadisticas/', 'augmentation/')
+    # deben ir ANTES del parámetro <str:community>/
     path('dataset/', DatasetEstadoView.as_view(), name='entrenamiento_dataset'),
     path('dataset/sesiones/', DatasetSesionesView.as_view(), name='entrenamiento_dataset_sesiones'),
     path('dataset/subir/', SubirAudioView.as_view(), name='entrenamiento_dataset_subir'),
     path('dataset/estadisticas/', EstadisticasGrabacionesView.as_view(), name='entrenamiento_dataset_estadisticas'),
+    path('dataset/augmentation/', AugmentationCatalogoView.as_view(), name='entrenamiento_augmentation_catalogo'),
     path('dataset/<str:community>/', DatasetComunidadView.as_view(), name='entrenamiento_dataset_comunidad'),
 
     # Lanzar entrenamiento

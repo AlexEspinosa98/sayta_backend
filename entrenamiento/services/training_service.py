@@ -348,6 +348,19 @@ def _run_training(exp, samples: List[Dict], config: Dict, task_id: str,
             'fp16': use_fp16,
         })
 
+        # --- Log data augmentation ---
+        aug_cfg = config.get('augmentation') or {}
+        aug_habilitado = bool(aug_cfg.get('habilitado', False))
+        mlflow.log_params({'augmentation_habilitado': aug_habilitado})
+        if aug_habilitado:
+            tecnicas_activas = [
+                t for t, tc in (aug_cfg.get('tecnicas') or {}).items()
+                if isinstance(tc, dict) and tc.get('habilitado', False)
+            ]
+            mlflow.log_params({
+                'augmentation_tecnicas': ', '.join(tecnicas_activas) if tecnicas_activas else 'ninguna',
+            })
+
         output_dir = str(
             Path(getattr(settings, 'MODELOS_ENTRENADOS_DIR', str(Path(settings.BASE_DIR) / 'modelos_entrenados')))
             / str(exp.id)
@@ -462,6 +475,13 @@ def _run_single_split(exp, samples, config, tipo, modelo_hf, ruta_local,
     chunks_dir.mkdir(parents=True, exist_ok=True)
     samples = _expand_samples(samples, chunks_dir)
 
+    # Data augmentation: genera muestras adicionales antes del split train/eval
+    aug_config = config.get('augmentation') or {}
+    if aug_config.get('habilitado', False):
+        from entrenamiento.services import augmentation_service
+        aug_dir = Path(output_dir) / 'augmented'
+        samples = augmentation_service.aplicar_augmentation(samples, aug_config, aug_dir)
+
     model = processor = train_ds = eval_ds = data_collator = trainer = None
     try:
         model, processor = _load_model_for_training(tipo, modelo_hf, ruta_local, samples, config)
@@ -548,6 +568,16 @@ def _run_cross_validation(exp, samples, config, tipo, modelo_hf, ruta_local,
     for fold_idx, (train_idx, eval_idx) in enumerate(kf.split(indices), start=1):
         fold_samples_train = [samples[i] for i in train_idx]
         fold_samples_eval = [samples[i] for i in eval_idx]
+
+        # Augmentar solo el split de entrenamiento de este fold
+        aug_config = config.get('augmentation') or {}
+        if aug_config.get('habilitado', False):
+            from entrenamiento.services import augmentation_service
+            aug_fold_dir = Path(output_dir) / 'augmented'
+            fold_samples_train = augmentation_service.aplicar_augmentation(
+                fold_samples_train, aug_config, aug_fold_dir
+            )
+
         fold_dir = str(Path(output_dir) / f'fold_{fold_idx}')
         Path(fold_dir).mkdir(parents=True, exist_ok=True)
 
