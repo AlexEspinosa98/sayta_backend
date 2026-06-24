@@ -70,6 +70,27 @@ GLOSARIO_CODIGOS_ALIAS = {
     'iku': 'arhuaco',
 }
 
+# Términos de búsqueda por código canónico. En producción el campo `codigo`
+# de Lengua es inconsistente (p. ej. "Kogui" con mayúscula, o "1" para la
+# lengua arhuaca), así que la resolución también busca por nombre/descripción.
+GLOSARIO_GRUPOS_BUSQUEDA = {
+    'kogui': ['kogui', 'cogui'],
+    'arhuaco': ['arhuaco', 'arhuaca', 'arhueco', 'iku', 'ikʉn', 'ikun'],
+}
+
+
+def _resolver_lengua(codigo_canonico):
+    """Busca una Lengua por codigo, nombre o descripcion (case-insensitive)."""
+    terminos_busqueda = GLOSARIO_GRUPOS_BUSQUEDA.get(codigo_canonico, [codigo_canonico])
+    filtro = Q()
+    for termino in terminos_busqueda:
+        filtro |= (
+            Q(codigo__iexact=termino)
+            | Q(nombre__icontains=termino)
+            | Q(descripcion__icontains=termino)
+        )
+    return Lengua.objects.filter(filtro).first()
+
 
 # ---------------------------------------------------------------------------
 # Paginación estándar del proyecto
@@ -584,7 +605,7 @@ class TerminoLengViewSet(viewsets.ModelViewSet):
 
         resultado = {}
         for codigo in codigos_canonicos:
-            lengua = Lengua.objects.filter(codigo=codigo).first()
+            lengua = _resolver_lengua(codigo)
             if lengua is None:
                 resultado[codigo] = []
                 continue
