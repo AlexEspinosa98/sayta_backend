@@ -11,6 +11,7 @@ Endpoints expuestos:
   GET/POST        /api/terminos/terminos/
   GET/PUT/PATCH/DELETE /api/terminos/terminos/{id}/
   POST            /api/terminos/terminos/carga-masiva/
+  GET             /api/terminos/terminos/glosarios/
 
   GET             /api/terminos/embeddings/
   GET             /api/terminos/embeddings/{id}/
@@ -47,6 +48,18 @@ from .serializers import (
 from .services.embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
+
+
+# Alias aceptados en el parámetro `codigos` del endpoint de exportación de
+# glosarios; deben resolver a los mismos códigos canónicos usados en
+# translator_api.views.COMMUNITY_ALIASES.
+GLOSARIO_CODIGOS_ALIAS = {
+    'kogui': 'kogui',
+    'cogui': 'kogui',
+    'arhuaco': 'arhuaco',
+    'arhueco': 'arhuaco',
+    'iku': 'arhuaco',
+}
 
 
 # ---------------------------------------------------------------------------
@@ -483,6 +496,94 @@ class TerminoLengViewSet(viewsets.ModelViewSet):
             'errores': errores,
             'detalle_errores': detalle_errores,
         }
+
+    @extend_schema(
+        tags=['Términos Lengua'],
+        summary='Descargar glosarios kogui y arhuaco para revisión',
+        description=(
+            'Exporta los términos ya cargados en la base de datos para kogui y arhuaco '
+            '(o las lenguas indicadas en `codigos`) en un único JSON diferenciado por lengua, '
+            'con cabecera `Content-Disposition` para descargarlo directamente.\n\n'
+            'Acepta alias: `kogui`/`cogui`, `arhuaco`/`arhueco`/`iku`.'
+        ),
+        parameters=[
+            OpenApiParameter('codigos', str, description='Códigos de lengua separados por coma. Default: kogui,arhuaco'),
+            OpenApiParameter('activo', bool, description='true = solo activos, false = solo inactivos. Si se omite, incluye todos'),
+        ],
+        responses={200: OpenApiResponse(description='JSON descargable: { "kogui": [...], "arhuaco": [...] }')},
+        examples=[
+            OpenApiExample(
+                'Respuesta',
+                value={
+                    'kogui': [
+                        {
+                            'termino': 'Muñzek gue',
+                            'definicion': 'Saludo matutino.',
+                            'pos': 'FRS',
+                            'termino_es': 'buenos días',
+                            'sinonimos': [],
+                            'ejemplos': [],
+                            'tipo_morfema': None,
+                            'activo': True,
+                        }
+                    ],
+                    'arhuaco': [],
+                },
+                response_only=True,
+            )
+        ],
+    )
+    @action(detail=False, methods=['get'], url_path='glosarios')
+    def glosarios(self, request):
+        """
+        GET /api/terminos/terminos/glosarios/?codigos=kogui,arhuaco&activo=true
+
+        Exporta los términos por lengua en el mismo formato usado en carga-masiva,
+        diferenciados por código de lengua, listo para descargar y revisar.
+        """
+        codigos_param = request.query_params.get('codigos', 'kogui,arhuaco')
+        codigos_canonicos = []
+        for crudo in codigos_param.split(','):
+            crudo = crudo.strip().lower()
+            if not crudo:
+                continue
+            canonico = GLOSARIO_CODIGOS_ALIAS.get(crudo, crudo)
+            if canonico not in codigos_canonicos:
+                codigos_canonicos.append(canonico)
+
+        activo_param = request.query_params.get('activo')
+        activo_filtro = None
+        if activo_param is not None:
+            activo_filtro = activo_param.strip().lower() in ('true', '1', 'si', 'sí')
+
+        resultado = {}
+        for codigo in codigos_canonicos:
+            lengua = Lengua.objects.filter(codigo=codigo).first()
+            if lengua is None:
+                resultado[codigo] = []
+                continue
+
+            qs = TerminoLeng.objects.filter(lengua=lengua).select_related('termino_es').order_by('termino')
+            if activo_filtro is not None:
+                qs = qs.filter(activo=activo_filtro)
+
+            resultado[codigo] = [
+                {
+                    'termino': t.termino,
+                    'definicion': t.definicion,
+                    'pos': t.pos,
+                    'termino_es': t.termino_es.termino if t.termino_es else None,
+                    'sinonimos': t.sinonimos,
+                    'ejemplos': t.ejemplos,
+                    'tipo_morfema': t.tipo_morfema,
+                    'activo': t.activo,
+                }
+                for t in qs
+            ]
+
+        response = Response(resultado)
+        response['Content-Disposition'] = 'attachment; filename="glosarios_kogui_arhuaco.json"'
+        return response
 
 
 # ---------------------------------------------------------------------------
