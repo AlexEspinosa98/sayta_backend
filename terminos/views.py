@@ -26,7 +26,14 @@ from django.db import transaction
 from django.db.models import Q
 from django.http import HttpResponse
 from django_filters.rest_framework import DjangoFilterBackend
-from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema, extend_schema_view
+from drf_spectacular.utils import (
+    OpenApiExample,
+    OpenApiParameter,
+    OpenApiResponse,
+    extend_schema,
+    extend_schema_view,
+    inline_serializer,
+)
 from rest_framework import filters, mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
@@ -43,6 +50,7 @@ from .serializers import (
     GenerarEmbeddingSerializer,
     LenguaSerializer,
     TerminoEsSerializer,
+    TerminoItemSerializer,
     TerminoLengCreateSerializer,
     TerminoLengSerializer,
 )
@@ -510,10 +518,25 @@ class TerminoLengViewSet(viewsets.ModelViewSet):
             'Acepta alias: `kogui`/`cogui`, `arhuaco`/`arhueco`/`iku`.'
         ),
         parameters=[
-            OpenApiParameter('codigos', str, description='Códigos de lengua separados por coma. Default: kogui,arhuaco'),
+            OpenApiParameter(
+                'codigos', str,
+                description='Códigos de lengua separados por coma.',
+                default='kogui,arhuaco',
+            ),
             OpenApiParameter('activo', bool, description='true = solo activos, false = solo inactivos. Si se omite, incluye todos'),
         ],
-        responses={200: OpenApiResponse(description='Archivo JSON descargable: { "kogui": [...], "arhuaco": [...] }')},
+        responses={
+            200: OpenApiResponse(
+                description='Archivo JSON descargable, diferenciado por código de lengua.',
+                response=inline_serializer(
+                    name='GlosarioExportResponse',
+                    fields={
+                        'kogui': TerminoItemSerializer(many=True),
+                        'arhuaco': TerminoItemSerializer(many=True),
+                    },
+                ),
+            ),
+        },
         examples=[
             OpenApiExample(
                 'Respuesta',
