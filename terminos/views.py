@@ -24,6 +24,7 @@ import logging
 
 from django.db import transaction
 from django.db.models import Q
+from django.http import HttpResponse
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema, extend_schema_view
 from rest_framework import filters, mixins, status, viewsets
@@ -502,15 +503,17 @@ class TerminoLengViewSet(viewsets.ModelViewSet):
         summary='Descargar glosarios kogui y arhuaco para revisión',
         description=(
             'Exporta los términos ya cargados en la base de datos para kogui y arhuaco '
-            '(o las lenguas indicadas en `codigos`) en un único JSON diferenciado por lengua, '
-            'con cabecera `Content-Disposition` para descargarlo directamente.\n\n'
+            '(o las lenguas indicadas en `codigos`) en un único archivo JSON diferenciado por lengua.\n\n'
+            'Se sirve como `application/octet-stream` con `Content-Disposition: attachment`, '
+            'por lo que se descarga como archivo tanto al abrir la URL en el navegador como '
+            'desde el botón "Download file" de Swagger UI o "Save Response" de Postman.\n\n'
             'Acepta alias: `kogui`/`cogui`, `arhuaco`/`arhueco`/`iku`.'
         ),
         parameters=[
             OpenApiParameter('codigos', str, description='Códigos de lengua separados por coma. Default: kogui,arhuaco'),
             OpenApiParameter('activo', bool, description='true = solo activos, false = solo inactivos. Si se omite, incluye todos'),
         ],
-        responses={200: OpenApiResponse(description='JSON descargable: { "kogui": [...], "arhuaco": [...] }')},
+        responses={200: OpenApiResponse(description='Archivo JSON descargable: { "kogui": [...], "arhuaco": [...] }')},
         examples=[
             OpenApiExample(
                 'Respuesta',
@@ -581,7 +584,8 @@ class TerminoLengViewSet(viewsets.ModelViewSet):
                 for t in qs
             ]
 
-        response = Response(resultado)
+        contenido = json.dumps(resultado, ensure_ascii=False, indent=2)
+        response = HttpResponse(contenido, content_type='application/octet-stream')
         response['Content-Disposition'] = 'attachment; filename="glosarios_kogui_arhuaco.json"'
         return response
 
