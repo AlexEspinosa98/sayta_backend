@@ -6,10 +6,12 @@ Crea o asegura las cuentas reales del equipo Sayta:
     'colaborador_lengua': solo pueden etiquetar audios y editar el glosario,
     nunca crear ni eliminar. Toda acción queda registrada en roles.Auditoria.
 
-Es idempotente: si el usuario ya existe, no lo recrea ni le toca la
-contraseña — solo asegura que tenga el rol correcto. Para usuarios nuevos
-genera una contraseña aleatoria y la imprime una sola vez en consola (no se
-guarda en ningún archivo del repo).
+Es idempotente: si el usuario ya existe, no lo recrea. Para usuarios sin
+contraseña fija en USUARIOS_EQUIPO, genera una aleatoria solo la primera vez
+y la imprime en consola (no se guarda en ningún archivo del repo). Para
+usuarios con contraseña fija definida abajo (como el admin), esa contraseña
+se asegura en cada corrida — así queda predecible aunque se ejecute varias
+veces.
 
 Uso:
   python manage.py crear_usuarios_equipo
@@ -26,12 +28,14 @@ from usuarios.models import PerfilUsuario
 
 USUARIOS_EQUIPO = [
     {
-        'email': 'alexanderespinosaev@unimagdalena.edu.co',
+        'username': 'admin',
+        'email': 'admin@admin.com',
         'first_name': 'Alexander',
         'last_name': 'Espinosa',
         'rol': 'admin',
         'is_staff': True,
         'is_superuser': True,
+        'password': 'contra123',
     },
     {
         'email': 'dilancabasam@unimagdalena.edu.co',
@@ -96,6 +100,7 @@ class Command(BaseCommand):
 
         for data in USUARIOS_EQUIPO:
             username = data.get('username') or _username_from_email(data['email'])
+            password_fija = data.get('password')
             rol = Rol.objects.filter(codigo=data['rol']).first()
             if rol is None:
                 self.stderr.write(self.style.ERROR(
@@ -106,7 +111,7 @@ class Command(BaseCommand):
 
             user = User.objects.filter(username=username).first()
             if user is None:
-                password = _generar_password()
+                password = password_fija or _generar_password()
                 user = User.objects.create_user(
                     username=username,
                     email=data['email'],
@@ -124,15 +129,22 @@ class Command(BaseCommand):
                 if perfil.rol_id != rol.id:
                     perfil.rol = rol
                     perfil.save(update_fields=['rol'])
-                self.stdout.write(self.style.WARNING(
-                    f'Usuario "{username}" ya existía — rol asegurado como "{rol.nombre}".'
-                ))
+                # Solo las contraseñas fijas se re-aseguran en cada corrida —
+                # las generadas al azar nunca se tocan tras la primera vez.
+                if password_fija and not user.check_password(password_fija):
+                    user.set_password(password_fija)
+                    user.save(update_fields=['password'])
+                    self.stdout.write(self.style.WARNING(
+                        f'Usuario "{username}" ya existía — rol asegurado y contraseña fija re-aplicada.'
+                    ))
+                else:
+                    self.stdout.write(self.style.WARNING(
+                        f'Usuario "{username}" ya existía — rol asegurado como "{rol.nombre}".'
+                    ))
 
         if creados:
             self.stdout.write('\n' + '=' * 70)
-            self.stdout.write(self.style.SUCCESS(
-                'CREDENCIALES NUEVAS — cópialas ahora, no se vuelven a mostrar:'
-            ))
+            self.stdout.write(self.style.SUCCESS('CREDENCIALES:'))
             self.stdout.write('=' * 70)
             for username, email, password, rol_nombre in creados:
                 self.stdout.write(f'  usuario  : {username}')
@@ -140,6 +152,9 @@ class Command(BaseCommand):
                 self.stdout.write(f'  password : {password}')
                 self.stdout.write(f'  rol      : {rol_nombre}')
                 self.stdout.write('  ' + '-' * 40)
+            self.stdout.write(
+                'Las generadas al azar no se repiten en la próxima corrida — cópialas ahora.'
+            )
             self.stdout.write(
                 '\nPide a cada persona cambiar su contraseña en el primer login, '
                 'o hazlo tú con: python manage.py changepassword <usuario>\n'
