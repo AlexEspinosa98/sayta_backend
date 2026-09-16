@@ -30,7 +30,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from usuarios.permissions import EsAnotador, EsInvestigador
+from roles.permissions import requiere_permiso
 from .models import ExperimentoEntrenamiento, ModeloAudio
 from .serializers import (
     EntrenarRequestSerializer,
@@ -48,12 +48,24 @@ logger = logging.getLogger(__name__)
 
 AUDIO_EXTENSIONS_PERMITIDAS = {'.wav', '.mp3', '.ogg', '.flac', '.m4a', '.mp4'}
 
+VerModelosAsr = requiere_permiso('modelos_asr', 'ver')
+DescargarModelo = requiere_permiso('modelos_asr', 'descargar_modelo')
+LanzarEntrenamiento = requiere_permiso('modelos_asr', 'entrenar')
+CancelarExperimento = requiere_permiso('modelos_asr', 'cancelar_experimento')
+ActivarExperimento = requiere_permiso('modelos_asr', 'activar_experimento')
+LiberarMemoria = requiere_permiso('modelos_asr', 'liberar_memoria')
+VerDatasetAudio = requiere_permiso('dataset_audio', 'ver')
+SubirDatasetAudio = requiere_permiso('dataset_audio', 'subir')
+EjecutarTranscripcion = requiere_permiso('transcripcion', 'ejecutar')
+
 
 # ======================================================================
 # Catálogo de modelos
 # ======================================================================
 
 class ModelosDisponiblesView(APIView):
+    permission_classes = [VerModelosAsr]
+
     @extend_schema(
         tags=['Entrenamiento — Modelos'],
         summary='Catálogo de modelos HuggingFace recomendados para ASR',
@@ -83,6 +95,8 @@ class ModelosDisponiblesView(APIView):
 # ======================================================================
 
 class ModeloListView(APIView):
+    permission_classes = [VerModelosAsr]
+
     @extend_schema(
         tags=['Entrenamiento — Modelos'],
         summary='Lista de modelos ASR descargados localmente',
@@ -95,6 +109,7 @@ class ModeloListView(APIView):
 
 
 class ModeloDescargarView(APIView):
+    permission_classes = [DescargarModelo]
 
     @extend_schema(
         tags=['Entrenamiento — Modelos'],
@@ -185,6 +200,8 @@ class ModeloDescargarView(APIView):
 # ======================================================================
 
 class DatasetEstadoView(APIView):
+    permission_classes = [VerDatasetAudio]
+
     @extend_schema(
         tags=['Entrenamiento — Dataset'],
         summary='Estadísticas de datos etiquetados disponibles por comunidad',
@@ -200,6 +217,8 @@ class DatasetEstadoView(APIView):
 
 
 class DatasetComunidadView(APIView):
+    permission_classes = [VerDatasetAudio]
+
     @extend_schema(
         tags=['Entrenamiento — Dataset'],
         summary='Estadísticas detalladas por jornada de una comunidad',
@@ -219,6 +238,7 @@ class DatasetComunidadView(APIView):
 
 
 class SubirAudioView(APIView):
+    permission_classes = [SubirDatasetAudio]
     parser_classes = [MultiPartParser, FormParser]
 
     @extend_schema(
@@ -295,6 +315,8 @@ class SubirAudioView(APIView):
 
 
 class AugmentationCatalogoView(APIView):
+    permission_classes = [VerDatasetAudio]
+
     @extend_schema(
         tags=['Entrenamiento — Dataset'],
         summary='Catálogo de técnicas de Data Augmentation disponibles',
@@ -384,6 +406,8 @@ class AugmentationCatalogoView(APIView):
 
 
 class EstadisticasGrabacionesView(APIView):
+    permission_classes = [VerDatasetAudio]
+
     @extend_schema(
         tags=['Entrenamiento — Dataset'],
         summary='Estadísticas de tiempo de grabación por comunidad',
@@ -437,6 +461,8 @@ class EstadisticasGrabacionesView(APIView):
 
 
 class DatasetSesionesView(APIView):
+    permission_classes = [VerDatasetAudio]
+
     @extend_schema(
         tags=['Entrenamiento — Dataset'],
         summary='Lista plana de todas las jornadas disponibles (para selección granular)',
@@ -457,6 +483,8 @@ class DatasetSesionesView(APIView):
 # ======================================================================
 
 class LenguasEntrenamientoView(APIView):
+    permission_classes = [VerModelosAsr]
+
     @extend_schema(
         tags=['Entrenamiento — Lenguas'],
         summary='Lista de lenguas activas con estado de modelos ASR',
@@ -522,6 +550,7 @@ class LenguasEntrenamientoView(APIView):
 # ======================================================================
 
 class EntrenarView(APIView):
+    permission_classes = [LanzarEntrenamiento]
 
     @extend_schema(
         tags=['Entrenamiento — Experimentos'],
@@ -722,6 +751,8 @@ class EntrenarView(APIView):
 # ======================================================================
 
 class ExperimentoListView(APIView):
+    permission_classes = [VerModelosAsr]
+
     @extend_schema(
         tags=['Entrenamiento — Experimentos'],
         summary='Lista todos los experimentos de entrenamiento',
@@ -742,6 +773,8 @@ class ExperimentoListView(APIView):
 
 
 class ExperimentoDetailView(APIView):
+    permission_classes = [VerModelosAsr]
+
     @extend_schema(
         tags=['Entrenamiento — Experimentos'],
         summary='Detalle de un experimento (métricas, config, MLflow)',
@@ -759,6 +792,8 @@ class ExperimentoDetailView(APIView):
 
 
 class ExperimentoEstadoView(APIView):
+    permission_classes = [VerModelosAsr]
+
     @extend_schema(
         tags=['Entrenamiento — Experimentos'],
         summary='Estado en tiempo real de un experimento',
@@ -796,6 +831,7 @@ class ExperimentoEstadoView(APIView):
 
 
 class ExperimentoCancelarView(APIView):
+    permission_classes = [CancelarExperimento]
 
     @extend_schema(
         tags=['Entrenamiento — Experimentos'],
@@ -847,6 +883,7 @@ class ExperimentoCancelarView(APIView):
 
 
 class ExperimentoActivarView(APIView):
+    permission_classes = [ActivarExperimento]
 
     @extend_schema(
         tags=['Entrenamiento — Experimentos'],
@@ -920,6 +957,7 @@ class ExperimentoActivarView(APIView):
 # ======================================================================
 
 class TranscribirView(APIView):
+    permission_classes = [EjecutarTranscripcion]
     parser_classes = [MultiPartParser, FormParser]
 
     @extend_schema(
@@ -1000,6 +1038,7 @@ class TranscribirView(APIView):
 
 
 class TranscribirTraducirView(APIView):
+    permission_classes = [EjecutarTranscripcion]
     parser_classes = [MultiPartParser, FormParser]
 
     @extend_schema(
@@ -1144,6 +1183,8 @@ class TranscribirTraducirView(APIView):
 # ======================================================================
 
 class SistemaView(APIView):
+    permission_classes = [VerModelosAsr]
+
     @extend_schema(
         tags=['Entrenamiento — Sistema'],
         summary='Recursos del servidor disponibles para entrenamiento',
@@ -1274,6 +1315,7 @@ class SistemaView(APIView):
 
 
 class SistemaLiberarMemoriaView(APIView):
+    permission_classes = [LiberarMemoria]
 
     @extend_schema(
         tags=['Entrenamiento — Sistema'],
