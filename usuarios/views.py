@@ -10,13 +10,13 @@ Endpoints:
   GET  /api/auth/usuarios/            Listar todos los usuarios (solo admin)
   GET  /api/auth/usuarios/<id>/       Detalle de un usuario (solo admin)
   PATCH /api/auth/usuarios/<id>/      Actualizar usuario o rol (solo admin)
-  DELETE /api/auth/usuarios/<id>/     Desactivar usuario (solo admin)
+  DELETE /api/auth/usuarios/<id>/     Desactivar o borrar usuario (solo admin)
 """
 
 import logging
 
 from django.contrib.auth.models import User
-from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
+from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.permissions import IsAuthenticated
@@ -143,9 +143,10 @@ class LoginView(APIView):
                 'type': 'object',
                 'properties': {
                     'username': {'type': 'string', 'example': 'admin'},
+                    'email': {'type': 'string', 'example': 'admin@sayta.co'},
                     'password': {'type': 'string', 'example': 'contraseña123'},
                 },
-                'required': ['username', 'password'],
+                'required': ['password'],
             }
         },
         responses={
@@ -262,13 +263,15 @@ class RegistroView(APIView):
                     'password': {'type': 'string', 'example': 'contraseña123'},
                     'first_name': {'type': 'string', 'example': 'María'},
                     'last_name': {'type': 'string', 'example': 'López'},
+                    'etnia': {'type': 'string', 'enum': ['arhuaco', 'kogui'], 'example': 'kogui'},
+                    'comunidad': {'type': 'string', 'example': 'Seykun'},
                     'rol': {
                         'type': 'string',
-                        'enum': ['admin', 'investigador', 'anotador', 'consultor'],
+                        'enum': ['admin', 'desarrollador', 'investigador', 'anotador', 'consultor', 'colaborador_lengua', 'pendiente'],
                         'example': 'anotador',
                     },
                 },
-                'required': ['username', 'email', 'password', 'rol'],
+                'required': ['email', 'password', 'rol'],
             }
         },
         responses={
@@ -321,8 +324,10 @@ class RegistroPublicoView(APIView):
                     'password': {'type': 'string', 'example': 'contraseña123'},
                     'first_name': {'type': 'string', 'example': 'María'},
                     'last_name': {'type': 'string', 'example': 'López'},
+                    'etnia': {'type': 'string', 'enum': ['arhuaco', 'kogui'], 'example': 'arhuaco'},
+                    'comunidad': {'type': 'string', 'example': 'Nabusimake'},
                 },
-                'required': ['username', 'email', 'password'],
+                'required': ['email', 'password'],
             }
         },
         responses={
@@ -406,10 +411,13 @@ class UsuarioDetailView(APIView):
             'application/json': {
                 'type': 'object',
                 'properties': {
+                    'username': {'type': 'string'},
                     'email': {'type': 'string'},
                     'first_name': {'type': 'string'},
                     'last_name': {'type': 'string'},
-                    'rol': {'type': 'string', 'enum': ['admin', 'investigador', 'anotador', 'consultor']},
+                    'rol': {'type': 'string', 'enum': ['admin', 'desarrollador', 'investigador', 'anotador', 'consultor', 'colaborador_lengua', 'pendiente']},
+                    'etnia': {'type': 'string', 'enum': ['arhuaco', 'kogui']},
+                    'comunidad': {'type': 'string'},
                     'is_active': {'type': 'boolean'},
                     'password': {'type': 'string', 'minLength': 8},
                 },
@@ -435,6 +443,8 @@ class UsuarioDetailView(APIView):
         data = serializer.validated_data
         rol = data.pop('rol', None)
         password = data.pop('password', None)
+        etnia = data.pop('etnia', None)
+        comunidad = data.pop('comunidad', None)
 
         for field, value in data.items():
             setattr(user, field, value)
@@ -457,12 +467,39 @@ class UsuarioDetailView(APIView):
             # muestre el rol recién asignado, no el anterior.
             user.refresh_from_db()
 
+        if etnia is not None or comunidad is not None:
+            perfil = user.perfil
+            update_fields = []
+            if etnia is not None:
+                perfil.etnia = etnia
+                update_fields.append('etnia')
+            if comunidad is not None:
+                perfil.comunidad = comunidad
+                update_fields.append('comunidad')
+            update_fields.append('updated_at')
+            perfil.save(update_fields=update_fields)
+            user.refresh_from_db()
+
         logger.info('Usuario actualizado: %s por %s', user.username, request.user.username)
         return Response(UsuarioSerializer(user).data)
 
     @extend_schema(
         tags=['Auth — Administración'],
-        summary='Desactivar un usuario (no lo elimina)',
+        summary='Desactivar o borrar un usuario',
+        description=(
+            'Por defecto suspende el acceso del usuario (`is_active=false`) y elimina '
+            'su token. Para borrarlo definitivamente, enviar `?hard=true`. '
+            'No permite desactivar ni borrar la propia cuenta autenticada.'
+        ),
+        parameters=[
+            OpenApiParameter(
+                name='hard',
+                type=bool,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description='`true` para borrar definitivamente el usuario. Si se omite, solo lo desactiva.',
+            ),
+        ],
         responses={
             200: OpenApiResponse(description='Usuario desactivado'),
             404: OpenApiResponse(description='Usuario no encontrado'),
@@ -475,9 +512,20 @@ class UsuarioDetailView(APIView):
 
         if user.pk == request.user.pk:
             return Response(
-                {'error': 'No puedes desactivar tu propia cuenta.'},
+                {'error': 'No puedes desactivar ni borrar tu propia cuenta.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        hard_delete = str(request.query_params.get('hard', '')).strip().lower() in (
+            '1', 'true', 'si', 'sí', 'yes'
+        )
+
+        if hard_delete:
+            username = user.username
+            Token.objects.filter(user=user).delete()
+            user.delete()
+            logger.info('Usuario borrado definitivamente: %s por %s', username, request.user.username)
+            return Response({'mensaje': f'Usuario "{username}" borrado definitivamente.'})
 
         user.is_active = False
         user.save(update_fields=['is_active'])
