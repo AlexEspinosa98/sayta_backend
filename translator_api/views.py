@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Tuple
 from django.conf import settings
 from django.http import FileResponse, JsonResponse, HttpRequest, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
+from roles.decorators import requiere_permiso_django
 from .schema import OPENAPI_SCHEMA
 from .search_engine import load_metadata as se_load_metadata, semantic_search
 
@@ -371,6 +372,7 @@ def run_langgraph_pipeline(text: str) -> Dict:
     }
 
 
+@requiere_permiso_django('traduccion', 'ejecutar')
 @csrf_exempt
 def translate_view(request: HttpRequest):
     """Endpoint principal.
@@ -424,6 +426,7 @@ def translate_view(request: HttpRequest):
     return JsonResponse(response)
 
 
+@requiere_permiso_django('dataset_audio', 'ver')
 def recordings_debug_path_view(request: HttpRequest):
     pwd = Path(os.getcwd())
 
@@ -451,6 +454,7 @@ def recordings_debug_path_view(request: HttpRequest):
     })
 
 
+@requiere_permiso_django('dataset_audio', 'ver')
 def recordings_root_view(request: HttpRequest):
     if request.method != "GET":
         return JsonResponse({"error": "Método no permitido"}, status=405)
@@ -542,6 +546,7 @@ def swagger_ui_view(request: HttpRequest):
     return HttpResponse(_SWAGGER_HTML, content_type="text/html")
 
 
+@requiere_permiso_django('dataset_audio', 'ver')
 def recordings_by_community_view(request: HttpRequest, community: str):
     if request.method != "GET":
         return JsonResponse({"error": "Método no permitido"}, status=405)
@@ -618,6 +623,7 @@ def _get_session_or_404(community: str, session: str):
     return community_dir, session_dir, None
 
 
+@requiere_permiso_django('dataset_audio', 'ver')
 def session_audios_view(request: HttpRequest, community: str, session: str):
     if request.method != "GET":
         return JsonResponse({"error": "Método no permitido"}, status=405)
@@ -666,6 +672,7 @@ def session_audios_view(request: HttpRequest, community: str, session: str):
     })
 
 
+@requiere_permiso_django('dataset_audio', 'ver')
 def session_audio_file_view(request: HttpRequest, community: str, session: str, filename: str):
     if request.method != "GET":
         return JsonResponse({"error": "Método no permitido"}, status=405)
@@ -686,6 +693,7 @@ def session_audio_file_view(request: HttpRequest, community: str, session: str, 
     )
 
 
+@requiere_permiso_django('dataset_audio', 'ver')
 def session_glosario_view(request: HttpRequest, community: str, session: str):
     if request.method != "GET":
         return JsonResponse({"error": "Método no permitido"}, status=405)
@@ -703,6 +711,7 @@ def session_glosario_view(request: HttpRequest, community: str, session: str):
     return JsonResponse(data, safe=False)
 
 
+@requiere_permiso_django('dataset_audio', 'etiquetar')
 @csrf_exempt
 def session_etiquetar_view(request: HttpRequest, community: str, session: str):
     if request.method != "POST":
@@ -748,6 +757,7 @@ def session_etiquetar_view(request: HttpRequest, community: str, session: str):
     }, status=201)
 
 
+@requiere_permiso_django('dataset_audio', {'GET': 'ver', 'PUT': 'etiquetar', 'DELETE': 'eliminar'})
 @csrf_exempt
 def session_etiqueta_view(request: HttpRequest, community: str, session: str, filename: str):
     _, session_dir, err = _get_session_or_404(community, session)
@@ -787,6 +797,7 @@ def session_etiqueta_view(request: HttpRequest, community: str, session: str, fi
     return JsonResponse({"error": "Método no permitido"}, status=405)
 
 
+@requiere_permiso_django('dataset_audio', 'ver')
 def session_estado_view(request: HttpRequest, community: str, session: str):
     if request.method != "GET":
         return JsonResponse({"error": "Método no permitido"}, status=405)

@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     'drf_spectacular',
     # Propias
     'health',
+    'roles',
     'usuarios',
     'translator_api',
     'terminos',
@@ -109,9 +110,8 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
     ],
-    # TODO: volver a IsAuthenticated antes de producción
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.AllowAny',
+        'rest_framework.permissions.IsAuthenticated',
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
@@ -171,6 +171,8 @@ SPECTACULAR_SETTINGS = {
         {'name': 'Entrenamiento — Dataset', 'description': 'Estadísticas de audios etiquetados por comunidad'},
         {'name': 'Entrenamiento — Experimentos', 'description': 'Fine-tuning, seguimiento MLflow y activación de modelos'},
         {'name': 'Entrenamiento — Transcripción', 'description': 'Transcripción de audio y pipeline audio → texto → traducción'},
+        {'name': 'Admin — Módulos', 'description': 'Gestión dinámica de secciones y permisos del sistema (solo admin)'},
+        {'name': 'Admin — Roles', 'description': 'Gestión dinámica de roles y su matriz de permisos (solo admin)'},
     ],
 }
 

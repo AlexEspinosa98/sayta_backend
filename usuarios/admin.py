@@ -18,7 +18,7 @@ class UsuarioConPerfilAdmin(UserAdmin):
 
     def get_rol(self, obj):
         try:
-            return obj.perfil.get_rol_display()
+            return obj.perfil.rol.nombre
         except PerfilUsuario.DoesNotExist:
             return '—'
     get_rol.short_description = 'Rol'

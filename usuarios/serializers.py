@@ -2,6 +2,7 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
+from roles.models import Rol
 from .models import PerfilUsuario
 
 
@@ -26,6 +27,15 @@ class PerfilSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at']
 
 
+def _validar_codigo_rol(value):
+    if not Rol.objects.filter(codigo=value, activo=True).exists():
+        raise serializers.ValidationError(
+            f'"{value}" no es un rol válido o está inactivo. '
+            'Consulta los roles disponibles en GET /api/admin/roles/.'
+        )
+    return value
+
+
 class UsuarioSerializer(serializers.ModelSerializer):
     rol = serializers.SerializerMethodField()
     rol_display = serializers.SerializerMethodField()
@@ -40,13 +50,13 @@ class UsuarioSerializer(serializers.ModelSerializer):
 
     def get_rol(self, obj):
         try:
-            return obj.perfil.rol
+            return obj.perfil.rol.codigo
         except PerfilUsuario.DoesNotExist:
             return None
 
     def get_rol_display(self, obj):
         try:
-            return obj.perfil.get_rol_display()
+            return obj.perfil.rol.nombre
         except PerfilUsuario.DoesNotExist:
             return None
 
@@ -59,7 +69,10 @@ class RegistroSerializer(serializers.Serializer):
     )
     first_name = serializers.CharField(max_length=150, required=False, default='')
     last_name = serializers.CharField(max_length=150, required=False, default='')
-    rol = serializers.ChoiceField(choices=PerfilUsuario.ROL_CHOICES)
+    rol = serializers.CharField()
+
+    def validate_rol(self, value):
+        return _validar_codigo_rol(value)
 
     def validate_username(self, value):
         if User.objects.filter(username=value).exists():
@@ -72,9 +85,10 @@ class RegistroSerializer(serializers.Serializer):
         return value
 
     def create(self, validated_data):
-        rol = validated_data.pop('rol')
+        rol_codigo = validated_data.pop('rol')
         password = validated_data.pop('password')
         user = User.objects.create_user(password=password, **validated_data)
+        rol = Rol.objects.get(codigo=rol_codigo)
         PerfilUsuario.objects.create(usuario=user, rol=rol)
         return user
 
@@ -83,11 +97,14 @@ class ActualizarUsuarioSerializer(serializers.Serializer):
     email = serializers.EmailField(required=False)
     first_name = serializers.CharField(max_length=150, required=False)
     last_name = serializers.CharField(max_length=150, required=False)
-    rol = serializers.ChoiceField(choices=PerfilUsuario.ROL_CHOICES, required=False)
+    rol = serializers.CharField(required=False)
     is_active = serializers.BooleanField(required=False)
     password = serializers.CharField(
         write_only=True, min_length=8, required=False, style={'input_type': 'password'}
     )
+
+    def validate_rol(self, value):
+        return _validar_codigo_rol(value)
 
     def validate_email(self, value):
         user_id = self.context.get('user_id')

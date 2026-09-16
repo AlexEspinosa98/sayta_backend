@@ -9,6 +9,7 @@ Uso:
 from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand
 
+from roles.models import Rol
 from usuarios.models import PerfilUsuario
 
 
@@ -42,12 +43,13 @@ class Command(BaseCommand):
             )
             self.stdout.write(self.style.SUCCESS(f'Usuario "{username}" creado.'))
 
+        rol_admin = Rol.objects.get(codigo='admin')
         perfil, created = PerfilUsuario.objects.get_or_create(
             usuario=user,
-            defaults={'rol': PerfilUsuario.ROL_ADMIN},
+            defaults={'rol': rol_admin},
         )
-        if not created and perfil.rol != PerfilUsuario.ROL_ADMIN:
-            perfil.rol = PerfilUsuario.ROL_ADMIN
+        if not created and perfil.rol_id != rol_admin.id:
+            perfil.rol = rol_admin
             perfil.save(update_fields=['rol'])
 
         self.stdout.write(self.style.SUCCESS(

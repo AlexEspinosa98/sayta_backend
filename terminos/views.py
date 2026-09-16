@@ -38,10 +38,9 @@ from rest_framework import filters, mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import JSONParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from usuarios.permissions import EsInvestigador
+from roles.permissions import requiere_permiso
 from .models import EmbeddingVersion, Lengua, TerminoEs, TerminoLeng
 from .serializers import (
     CargaMasivaResponseSerializer,
@@ -104,6 +103,30 @@ class StandardPagination(PageNumberPagination):
 
 
 # ---------------------------------------------------------------------------
+# Permisos dinámicos por acción de ViewSet
+# ---------------------------------------------------------------------------
+
+
+class PermisoPorAccionMixin:
+    """Traduce self.action (DRF) al permiso requerido en el módulo declarado."""
+
+    modulo_permiso = None
+    mapa_accion_permiso = {
+        'list': 'ver',
+        'retrieve': 'ver',
+        'create': 'crear',
+        'update': 'editar',
+        'partial_update': 'editar',
+        'destroy': 'eliminar',
+    }
+
+    def get_permissions(self):
+        accion = self.mapa_accion_permiso.get(self.action, self.action)
+        permission_class = requiere_permiso(self.modulo_permiso, accion)
+        return [permission_class()]
+
+
+# ---------------------------------------------------------------------------
 # Lenguas
 # ---------------------------------------------------------------------------
 
@@ -134,7 +157,8 @@ class StandardPagination(PageNumberPagination):
     partial_update=extend_schema(tags=['Lenguas'], summary='Actualizar campos de una lengua'),
     destroy=extend_schema(tags=['Lenguas'], summary='Eliminar lengua'),
 )
-class LenguaViewSet(viewsets.ModelViewSet):
+class LenguaViewSet(PermisoPorAccionMixin, viewsets.ModelViewSet):
+    modulo_permiso = 'glosario'
     queryset = Lengua.objects.all()
     serializer_class = LenguaSerializer
     pagination_class = StandardPagination
@@ -170,7 +194,8 @@ class LenguaViewSet(viewsets.ModelViewSet):
     partial_update=extend_schema(tags=['Términos ES'], summary='Actualizar parcialmente'),
     destroy=extend_schema(tags=['Términos ES'], summary='Eliminar término en español'),
 )
-class TerminoEsViewSet(viewsets.ModelViewSet):
+class TerminoEsViewSet(PermisoPorAccionMixin, viewsets.ModelViewSet):
+    modulo_permiso = 'glosario'
     queryset = TerminoEs.objects.all()
     serializer_class = TerminoEsSerializer
     pagination_class = StandardPagination
@@ -231,8 +256,16 @@ class TerminoEsViewSet(viewsets.ModelViewSet):
         description='No elimina el registro. Pone `activo = false`. Usar `/restaurar/` para reactivar.',
     ),
 )
-class TerminoLengViewSet(viewsets.ModelViewSet):
+class TerminoLengViewSet(PermisoPorAccionMixin, viewsets.ModelViewSet):
     """CRUD completo de términos en lengua indígena con paginación y filtros."""
+
+    modulo_permiso = 'glosario'
+    mapa_accion_permiso = {
+        **PermisoPorAccionMixin.mapa_accion_permiso,
+        'restaurar': 'editar',
+        'carga_masiva': 'carga_masiva',
+        'glosarios': 'ver',
+    }
 
     queryset = (
         TerminoLeng.objects.select_related('lengua', 'termino_es').all()
@@ -656,11 +689,20 @@ class TerminoLengViewSet(viewsets.ModelViewSet):
     ),
 )
 class EmbeddingVersionViewSet(
+    PermisoPorAccionMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     viewsets.GenericViewSet,
 ):
     """Gestión de versiones de embeddings por lengua."""
+
+    modulo_permiso = 'embeddings'
+    mapa_accion_permiso = {
+        **PermisoPorAccionMixin.mapa_accion_permiso,
+        'generar': 'generar',
+        'activar': 'activar',
+        'estado': 'ver',
+    }
 
     queryset = EmbeddingVersion.objects.select_related('lengua').all()
     serializer_class = EmbeddingVersionSerializer

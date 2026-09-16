@@ -3,30 +3,15 @@ from django.db import models
 
 
 class PerfilUsuario(models.Model):
-    ROL_ADMIN = 'admin'
-    ROL_DESARROLLADOR = 'desarrollador'
-    ROL_INVESTIGADOR = 'investigador'
-    ROL_ANOTADOR = 'anotador'
-    ROL_CONSULTOR = 'consultor'
-
-    ROL_CHOICES = [
-        (ROL_ADMIN, 'Administrador'),
-        (ROL_DESARROLLADOR, 'Desarrollador'),
-        (ROL_INVESTIGADOR, 'Investigador'),
-        (ROL_ANOTADOR, 'Anotador'),
-        (ROL_CONSULTOR, 'Consultor'),
-    ]
-
     usuario = models.OneToOneField(
         User,
         on_delete=models.CASCADE,
         related_name='perfil',
     )
-    rol = models.CharField(
-        max_length=20,
-        choices=ROL_CHOICES,
-        default=ROL_CONSULTOR,
-        db_index=True,
+    rol = models.ForeignKey(
+        'roles.Rol',
+        on_delete=models.PROTECT,
+        related_name='perfiles',
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -37,4 +22,4 @@ class PerfilUsuario(models.Model):
         verbose_name_plural = 'Perfiles de Usuario'
 
     def __str__(self):
-        return f'{self.usuario.username} [{self.get_rol_display()}]'
+        return f'{self.usuario.username} [{self.rol.nombre}]'

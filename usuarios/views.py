@@ -22,8 +22,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from roles.models import Rol
+from roles.permissions import requiere_permiso
 from .models import PerfilUsuario
-from .permissions import EsAdmin
 from .serializers import (
     ActualizarUsuarioSerializer,
     LoginSerializer,
@@ -32,6 +33,11 @@ from .serializers import (
 )
 
 logger = logging.getLogger(__name__)
+
+VeUsuarios = requiere_permiso('usuarios', 'ver')
+CreaUsuarios = requiere_permiso('usuarios', 'crear')
+EditaUsuarios = requiere_permiso('usuarios', 'editar')
+EliminaUsuarios = requiere_permiso('usuarios', 'eliminar')
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -79,7 +85,7 @@ class SetupAdminView(APIView):
     )
     def post(self, request):
         ya_hay_admin = (
-            PerfilUsuario.objects.filter(rol=PerfilUsuario.ROL_ADMIN).exists()
+            PerfilUsuario.objects.filter(rol__codigo='admin').exists()
         )
         if ya_hay_admin:
             return Response(
@@ -94,7 +100,7 @@ class SetupAdminView(APIView):
             )
 
         data = request.data.copy()
-        data['rol'] = PerfilUsuario.ROL_ADMIN
+        data['rol'] = 'admin'
 
         serializer = RegistroSerializer(data=data)
         if not serializer.is_valid():
@@ -174,8 +180,8 @@ class LoginView(APIView):
 
         nombre = f'{user.first_name} {user.last_name}'.strip() or user.username
         try:
-            rol = user.perfil.rol
-            rol_display = user.perfil.get_rol_display()
+            rol = user.perfil.rol.codigo
+            rol_display = user.perfil.rol.nombre
         except PerfilUsuario.DoesNotExist:
             rol = None
             rol_display = None
@@ -232,7 +238,7 @@ class PerfilView(APIView):
 # ──────────────────────────────────────────────────────────────────────────────
 
 class RegistroView(APIView):
-    permission_classes = [EsAdmin]
+    permission_classes = [CreaUsuarios]
 
     @extend_schema(
         tags=['Auth — Administración'],
@@ -290,7 +296,7 @@ class RegistroView(APIView):
 # ──────────────────────────────────────────────────────────────────────────────
 
 class UsuariosListView(APIView):
-    permission_classes = [EsAdmin]
+    permission_classes = [VeUsuarios]
 
     @extend_schema(
         tags=['Auth — Administración'],
@@ -306,7 +312,11 @@ class UsuariosListView(APIView):
 
 
 class UsuarioDetailView(APIView):
-    permission_classes = [EsAdmin]
+    _PERMISOS_POR_METODO = {'GET': VeUsuarios, 'PATCH': EditaUsuarios, 'DELETE': EliminaUsuarios}
+
+    def get_permissions(self):
+        permission_class = self._PERMISOS_POR_METODO.get(self.request.method, EditaUsuarios)
+        return [permission_class()]
 
     def _get_user(self, pk):
         try:
@@ -374,9 +384,13 @@ class UsuarioDetailView(APIView):
         user.save()
 
         if rol:
-            perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
-            perfil.rol = rol
-            perfil.save(update_fields=['rol', 'updated_at'])
+            rol_obj = Rol.objects.get(codigo=rol)
+            perfil, created = PerfilUsuario.objects.get_or_create(
+                usuario=user, defaults={'rol': rol_obj}
+            )
+            if not created:
+                perfil.rol = rol_obj
+                perfil.save(update_fields=['rol', 'updated_at'])
 
         logger.info('Usuario actualizado: %s por %s', user.username, request.user.username)
         return Response(UsuarioSerializer(user).data)
