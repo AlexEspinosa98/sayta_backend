@@ -1,30 +1,61 @@
 from rest_framework import serializers
 
-from .models import Modulo, Permiso, Rol
+from .models import Modulo, Permiso, Rol, SubModulo
 
 
 class PermisoSerializer(serializers.ModelSerializer):
     modulo_codigo = serializers.CharField(source='modulo.codigo', read_only=True)
+    submodulo_codigo = serializers.CharField(source='submodulo.codigo', read_only=True, allow_null=True)
 
     class Meta:
         model = Permiso
-        fields = ['id', 'modulo', 'modulo_codigo', 'codigo', 'nombre', 'descripcion']
-        read_only_fields = ['id', 'modulo', 'modulo_codigo']
+        fields = [
+            'id', 'modulo', 'modulo_codigo', 'submodulo', 'submodulo_codigo',
+            'codigo', 'nombre', 'descripcion', 'activo',
+        ]
+        read_only_fields = ['id', 'modulo', 'modulo_codigo', 'submodulo', 'submodulo_codigo']
 
 
 class PermisoCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Permiso
-        fields = ['codigo', 'nombre', 'descripcion']
+        fields = ['codigo', 'nombre', 'descripcion', 'activo']
 
 
-class ModuloSerializer(serializers.ModelSerializer):
+class SubModuloSerializer(serializers.ModelSerializer):
+    modulo_codigo = serializers.CharField(source='modulo.codigo', read_only=True)
     permisos = PermisoSerializer(many=True, read_only=True)
 
     class Meta:
+        model = SubModulo
+        fields = [
+            'id', 'modulo', 'modulo_codigo', 'codigo', 'nombre',
+            'descripcion', 'orden', 'activo', 'permisos',
+        ]
+        read_only_fields = ['id', 'modulo', 'modulo_codigo', 'permisos']
+
+
+class SubModuloCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SubModulo
+        fields = ['codigo', 'nombre', 'descripcion', 'orden', 'activo']
+
+
+class ModuloSerializer(serializers.ModelSerializer):
+    submodulos = SubModuloSerializer(many=True, read_only=True)
+    permisos = serializers.SerializerMethodField()
+
+    class Meta:
         model = Modulo
-        fields = ['id', 'codigo', 'nombre', 'descripcion', 'orden', 'activo', 'permisos']
-        read_only_fields = ['id', 'permisos']
+        fields = [
+            'id', 'codigo', 'nombre', 'descripcion', 'orden',
+            'activo', 'submodulos', 'permisos',
+        ]
+        read_only_fields = ['id', 'submodulos', 'permisos']
+
+    def get_permisos(self, obj):
+        permisos = obj.permisos.filter(submodulo__isnull=True)
+        return PermisoSerializer(permisos, many=True).data
 
 
 class ModuloCreateSerializer(serializers.ModelSerializer):

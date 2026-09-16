@@ -19,10 +19,13 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from roles.permissions import requiere_permiso
 from .pipeline import TranslationPipeline
 from .serializers import TraducirRequestSerializer, TraducirResponseSerializer
 
 logger = logging.getLogger(__name__)
+
+EjecutarTraduccion = requiere_permiso('traduccion', 'ejecutar')
 
 
 def _formatear_direccion(direccion: str, lengua_codigo: str) -> str:
@@ -32,6 +35,7 @@ def _formatear_direccion(direccion: str, lengua_codigo: str) -> str:
 
 
 class TraducirView(APIView):
+    permission_classes = [EjecutarTraduccion]
 
     @extend_schema(
         tags=['Traducción'],

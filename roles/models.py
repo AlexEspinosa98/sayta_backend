@@ -21,22 +21,53 @@ class Modulo(models.Model):
         return self.nombre
 
 
+class SubModulo(models.Model):
+    """Una vista o bloque funcional dentro de un módulo."""
+
+    modulo = models.ForeignKey(Modulo, related_name='submodulos', on_delete=models.CASCADE)
+    codigo = models.SlugField(max_length=50)
+    nombre = models.CharField(max_length=100)
+    descripcion = models.TextField(blank=True)
+    orden = models.PositiveIntegerField(default=0)
+    activo = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        db_table = 'roles_submodulos'
+        unique_together = ('modulo', 'codigo')
+        ordering = ['modulo__orden', 'orden', 'nombre']
+        verbose_name = 'Submódulo'
+        verbose_name_plural = 'Submódulos'
+
+    def __str__(self):
+        return f'{self.modulo.codigo}.{self.codigo}'
+
+
 class Permiso(models.Model):
     """Una acción concreta dentro de un módulo: ver, crear, editar, entrenar..."""
 
     modulo = models.ForeignKey(Modulo, related_name='permisos', on_delete=models.CASCADE)
+    submodulo = models.ForeignKey(
+        SubModulo,
+        related_name='permisos',
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+    )
     codigo = models.SlugField(max_length=50)
     nombre = models.CharField(max_length=100)
     descripcion = models.TextField(blank=True)
+    activo = models.BooleanField(default=True, db_index=True)
 
     class Meta:
         db_table = 'roles_permisos_catalogo'
-        unique_together = ('modulo', 'codigo')
-        ordering = ['modulo__orden', 'codigo']
+        unique_together = ('modulo', 'submodulo', 'codigo')
+        ordering = ['modulo__orden', 'submodulo__orden', 'codigo']
         verbose_name = 'Permiso'
         verbose_name_plural = 'Permisos'
 
     def __str__(self):
+        if self.submodulo_id:
+            return f'{self.modulo.codigo}.{self.submodulo.codigo}.{self.codigo}'
         return f'{self.modulo.codigo}.{self.codigo}'
 
 

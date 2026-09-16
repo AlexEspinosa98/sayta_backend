@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 ACCIONES_NO_AUDITADAS = {'ver'}
 
 
-def tiene_permiso(user, modulo_codigo: str, accion_codigo: str) -> bool:
+def tiene_permiso(user, modulo_codigo: str, accion_codigo: str, submodulo_codigo: str | None = None) -> bool:
     """
     True si `user` puede ejecutar `accion_codigo` dentro de `modulo_codigo`.
 
@@ -27,10 +27,17 @@ def tiene_permiso(user, modulo_codigo: str, accion_codigo: str) -> bool:
         return False
     if rol is None or not rol.activo:
         return False
+    filtros = {
+        'rol': rol,
+        'permiso__modulo__codigo': modulo_codigo,
+        'permiso__codigo': accion_codigo,
+        'permiso__activo': True,
+    }
+    if submodulo_codigo:
+        filtros['permiso__submodulo__codigo'] = submodulo_codigo
+
     return RolPermiso.objects.filter(
-        rol=rol,
-        permiso__modulo__codigo=modulo_codigo,
-        permiso__codigo=accion_codigo,
+        **filtros,
     ).exists()
 
 

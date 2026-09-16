@@ -8,11 +8,12 @@ tiene el rol 'admin' por semilla).
 import logging
 
 from drf_spectacular.utils import OpenApiResponse, extend_schema
+from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Modulo, Permiso, Rol, RolPermiso
+from .models import Modulo, Permiso, Rol, RolPermiso, SubModulo
 from .permissions import requiere_permiso
 from .serializers import (
     AsignarPermisosSerializer,
@@ -22,6 +23,8 @@ from .serializers import (
     PermisoSerializer,
     RolCreateSerializer,
     RolSerializer,
+    SubModuloCreateSerializer,
+    SubModuloSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,7 +45,10 @@ NOTA_DINAMISMO = (
 # ---------------------------------------------------------------------------
 
 class ModuloListCreateView(APIView):
-    permission_classes = [requiere_permiso(ADMIN_MODULO, ADMIN_ACCION)]
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [IsAuthenticated()]
+        return [requiere_permiso(ADMIN_MODULO, ADMIN_ACCION)()]
 
     @extend_schema(
         tags=['Admin — Módulos'],
@@ -50,7 +56,7 @@ class ModuloListCreateView(APIView):
         responses={200: ModuloSerializer(many=True)},
     )
     def get(self, request):
-        modulos = Modulo.objects.prefetch_related('permisos').all()
+        modulos = Modulo.objects.prefetch_related('permisos', 'submodulos__permisos').all()
         return Response({
             'nota': NOTA_DINAMISMO,
             'modulos': ModuloSerializer(modulos, many=True).data,
@@ -102,6 +108,13 @@ class ModuloDetailView(APIView):
         modulo = self._get(pk)
         if not modulo:
             return Response({'error': 'Módulo no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        hard_delete = str(request.query_params.get('hard', '')).strip().lower() in (
+            '1', 'true', 'si', 'sí', 'yes'
+        )
+        if hard_delete:
+            codigo = modulo.codigo
+            modulo.delete()
+            return Response({'mensaje': f'Módulo "{codigo}" borrado definitivamente.'})
         modulo.activo = False
         modulo.save(update_fields=['activo'])
         return Response({'mensaje': f'Módulo "{modulo.codigo}" desactivado.'})
@@ -134,12 +147,151 @@ class ModuloPermisosView(APIView):
         return Response(PermisoSerializer(permiso).data, status=status.HTTP_201_CREATED)
 
 
+class ModuloSubModulosView(APIView):
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [IsAuthenticated()]
+        return [requiere_permiso(ADMIN_MODULO, ADMIN_ACCION)()]
+
+    @extend_schema(
+        tags=['Admin — Submódulos'],
+        summary='Listar submódulos de una sección',
+        responses={200: SubModuloSerializer(many=True)},
+    )
+    def get(self, request, pk):
+        modulo = Modulo.objects.filter(pk=pk).first()
+        if not modulo:
+            return Response({'error': 'Módulo no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        submodulos = modulo.submodulos.prefetch_related('permisos').all()
+        return Response(SubModuloSerializer(submodulos, many=True).data)
+
+    @extend_schema(
+        tags=['Admin — Submódulos'],
+        summary='Crear submódulo dentro de una sección',
+        request=SubModuloCreateSerializer,
+        responses={201: SubModuloSerializer},
+    )
+    def post(self, request, pk):
+        modulo = Modulo.objects.filter(pk=pk).first()
+        if not modulo:
+            return Response({'error': 'Módulo no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = SubModuloCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        codigo = serializer.validated_data['codigo']
+        if SubModulo.objects.filter(modulo=modulo, codigo=codigo).exists():
+            return Response(
+                {'error': f'Ya existe el submódulo "{codigo}" en el módulo "{modulo.codigo}".'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        submodulo = serializer.save(modulo=modulo)
+        return Response(SubModuloSerializer(submodulo).data, status=status.HTTP_201_CREATED)
+
+
+class SubModuloDetailView(APIView):
+    permission_classes = [requiere_permiso(ADMIN_MODULO, ADMIN_ACCION)]
+
+    def _get(self, pk):
+        return SubModulo.objects.select_related('modulo').filter(pk=pk).first()
+
+    @extend_schema(tags=['Admin — Submódulos'], summary='Editar submódulo', request=SubModuloCreateSerializer)
+    def patch(self, request, pk):
+        submodulo = self._get(pk)
+        if not submodulo:
+            return Response({'error': 'Submódulo no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = SubModuloCreateSerializer(submodulo, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save()
+        return Response(SubModuloSerializer(submodulo).data)
+
+    @extend_schema(tags=['Admin — Submódulos'], summary='Desactivar submódulo')
+    def delete(self, request, pk):
+        submodulo = self._get(pk)
+        if not submodulo:
+            return Response({'error': 'Submódulo no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        hard_delete = str(request.query_params.get('hard', '')).strip().lower() in (
+            '1', 'true', 'si', 'sí', 'yes'
+        )
+        if hard_delete:
+            codigo = submodulo.codigo
+            submodulo.delete()
+            return Response({'mensaje': f'Submódulo "{codigo}" borrado definitivamente.'})
+        submodulo.activo = False
+        submodulo.save(update_fields=['activo'])
+        return Response({'mensaje': f'Submódulo "{submodulo.codigo}" desactivado.'})
+
+
+class SubModuloPermisosView(APIView):
+    permission_classes = [requiere_permiso(ADMIN_MODULO, ADMIN_ACCION)]
+
+    @extend_schema(
+        tags=['Admin — Submódulos'],
+        summary='Crear permiso dentro de un submódulo',
+        request=PermisoCreateSerializer,
+        responses={201: PermisoSerializer},
+    )
+    def post(self, request, pk):
+        submodulo = SubModulo.objects.select_related('modulo').filter(pk=pk).first()
+        if not submodulo:
+            return Response({'error': 'Submódulo no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = PermisoCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        codigo = serializer.validated_data['codigo']
+        if Permiso.objects.filter(modulo=submodulo.modulo, submodulo=submodulo, codigo=codigo).exists():
+            return Response(
+                {'error': f'Ya existe el permiso "{codigo}" en el submódulo "{submodulo.codigo}".'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        permiso = serializer.save(modulo=submodulo.modulo, submodulo=submodulo)
+        return Response(PermisoSerializer(permiso).data, status=status.HTTP_201_CREATED)
+
+
+class PermisoDetailView(APIView):
+    permission_classes = [requiere_permiso(ADMIN_MODULO, ADMIN_ACCION)]
+
+    def _get(self, pk):
+        return Permiso.objects.select_related('modulo', 'submodulo').filter(pk=pk).first()
+
+    @extend_schema(tags=['Admin — Permisos'], summary='Editar permiso', request=PermisoCreateSerializer)
+    def patch(self, request, pk):
+        permiso = self._get(pk)
+        if not permiso:
+            return Response({'error': 'Permiso no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = PermisoCreateSerializer(permiso, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save()
+        return Response(PermisoSerializer(permiso).data)
+
+    @extend_schema(tags=['Admin — Permisos'], summary='Desactivar permiso')
+    def delete(self, request, pk):
+        permiso = self._get(pk)
+        if not permiso:
+            return Response({'error': 'Permiso no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        hard_delete = str(request.query_params.get('hard', '')).strip().lower() in (
+            '1', 'true', 'si', 'sí', 'yes'
+        )
+        if hard_delete:
+            nombre = str(permiso)
+            permiso.delete()
+            return Response({'mensaje': f'Permiso "{nombre}" borrado definitivamente.'})
+        permiso.activo = False
+        permiso.save(update_fields=['activo'])
+        RolPermiso.objects.filter(permiso=permiso).delete()
+        return Response({'mensaje': f'Permiso "{permiso}" desactivado y removido de los roles.'})
+
+
 # ---------------------------------------------------------------------------
 # Roles
 # ---------------------------------------------------------------------------
 
 class RolListCreateView(APIView):
-    permission_classes = [requiere_permiso(ADMIN_MODULO, ADMIN_ACCION)]
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [IsAuthenticated()]
+        return [requiere_permiso(ADMIN_MODULO, ADMIN_ACCION)()]
 
     @extend_schema(
         tags=['Admin — Roles'],
@@ -264,7 +416,7 @@ class RolPermisosView(APIView):
 
 
 class MatrizView(APIView):
-    permission_classes = [requiere_permiso(ADMIN_MODULO, ADMIN_ACCION)]
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(
         tags=['Admin — Roles'],
@@ -272,27 +424,48 @@ class MatrizView(APIView):
         description='Pensada para pintar una tabla de administración en un futuro frontend.',
     )
     def get(self, request):
-        modulos = Modulo.objects.filter(activo=True).prefetch_related('permisos')
+        modulos = Modulo.objects.filter(activo=True).prefetch_related('permisos', 'submodulos__permisos')
         roles = Rol.objects.filter(activo=True)
         asignados = set(RolPermiso.objects.values_list('rol_id', 'permiso_id'))
 
         data = []
         for modulo in modulos:
             permisos_data = []
-            for permiso in modulo.permisos.all():
+            for permiso in modulo.permisos.filter(submodulo__isnull=True, activo=True):
                 permisos_data.append({
                     'permiso': permiso.codigo,
                     'permiso_id': permiso.id,
                     'nombre': permiso.nombre,
+                    'submodulo': None,
                     'roles': {
                         rol.codigo: (rol.id, permiso.id) in asignados
                         for rol in roles
                     },
                 })
+            submodulos_data = []
+            for submodulo in modulo.submodulos.filter(activo=True):
+                sub_permisos = []
+                for permiso in submodulo.permisos.filter(activo=True):
+                    sub_permisos.append({
+                        'permiso': permiso.codigo,
+                        'permiso_id': permiso.id,
+                        'nombre': permiso.nombre,
+                        'roles': {
+                            rol.codigo: (rol.id, permiso.id) in asignados
+                            for rol in roles
+                        },
+                    })
+                submodulos_data.append({
+                    'submodulo': submodulo.codigo,
+                    'submodulo_id': submodulo.id,
+                    'nombre': submodulo.nombre,
+                    'permisos': sub_permisos,
+                })
             data.append({
                 'modulo': modulo.codigo,
                 'nombre': modulo.nombre,
                 'permisos': permisos_data,
+                'submodulos': submodulos_data,
             })
 
         return Response({
