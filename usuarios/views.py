@@ -6,6 +6,7 @@ Endpoints:
   POST /api/auth/logout/              Invalidar token actual
   GET  /api/auth/perfil/              Perfil del usuario autenticado
   POST /api/auth/registro/            Registrar nuevo usuario (solo admin)
+  POST /api/auth/registro-publico/    Auto-registro público (nace con rol "pendiente", sin permisos)
   GET  /api/auth/usuarios/            Listar todos los usuarios (solo admin)
   GET  /api/auth/usuarios/<id>/       Detalle de un usuario (solo admin)
   PATCH /api/auth/usuarios/<id>/      Actualizar usuario o rol (solo admin)
@@ -28,6 +29,7 @@ from .models import PerfilUsuario
 from .serializers import (
     ActualizarUsuarioSerializer,
     LoginSerializer,
+    RegistroPublicoSerializer,
     RegistroSerializer,
     UsuarioSerializer,
 )
@@ -292,6 +294,65 @@ class RegistroView(APIView):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Auto-registro público — nace sin permisos, un admin le asigna el rol después
+# ──────────────────────────────────────────────────────────────────────────────
+
+class RegistroPublicoView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    @extend_schema(
+        tags=['Auth'],
+        summary='Auto-registro público (sin token)',
+        description=(
+            'Cualquier persona puede crear su propia cuenta. Nace con el rol '
+            '`pendiente`, que no tiene **ningún permiso** — no puede ver ni tocar '
+            'ningún módulo hasta que un administrador le asigne un rol real desde '
+            '`PATCH /api/auth/usuarios/<id>/`.\n\n'
+            'Devuelve token de una vez para que la persona pueda entrar y consultar '
+            '`GET /api/auth/perfil/` mientras espera la aprobación.'
+        ),
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'username': {'type': 'string', 'example': 'maria.lopez'},
+                    'email': {'type': 'string', 'example': 'maria@unimagdalena.edu.co'},
+                    'password': {'type': 'string', 'example': 'contraseña123'},
+                    'first_name': {'type': 'string', 'example': 'María'},
+                    'last_name': {'type': 'string', 'example': 'López'},
+                },
+                'required': ['username', 'email', 'password'],
+            }
+        },
+        responses={
+            201: OpenApiResponse(description='Cuenta creada con rol "pendiente"'),
+            400: OpenApiResponse(description='Datos inválidos o usuario ya existe'),
+        },
+        auth=[],
+    )
+    def post(self, request):
+        serializer = RegistroPublicoSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        user = serializer.save()
+        token, _ = Token.objects.get_or_create(user=user)
+        logger.info('Auto-registro público: %s (rol pendiente)', user.username)
+        return Response(
+            {
+                'mensaje': (
+                    f'Cuenta "{user.username}" creada. Un administrador debe '
+                    'asignarte un rol antes de que puedas usar el sistema.'
+                ),
+                'token': token.key,
+                'usuario': UsuarioSerializer(user).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Gestión de usuarios (admin)
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -391,6 +452,10 @@ class UsuarioDetailView(APIView):
             if not created:
                 perfil.rol = rol_obj
                 perfil.save(update_fields=['rol', 'updated_at'])
+            # user.perfil quedó en caché de la consulta original (select_related)
+            # con el rol viejo — refrescar para que la respuesta serializada
+            # muestre el rol recién asignado, no el anterior.
+            user.refresh_from_db()
 
         logger.info('Usuario actualizado: %s por %s', user.username, request.user.username)
         return Response(UsuarioSerializer(user).data)

@@ -189,6 +189,17 @@ ROLES = [
             'traduccion': TODO,
         },
     },
+    {
+        'codigo': 'pendiente',
+        'nombre': 'Pendiente de aprobación',
+        'descripcion': (
+            'Rol asignado automáticamente al auto-registrarse desde '
+            'POST /api/auth/registro-publico/. No tiene ningún permiso — '
+            'un administrador debe asignarle un rol real desde '
+            'PATCH /api/auth/usuarios/<id>/ antes de que pueda usar el sistema.'
+        ),
+        'permisos': {},
+    },
 ]
 
 

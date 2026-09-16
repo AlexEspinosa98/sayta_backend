@@ -4,6 +4,7 @@ from .views import (
     LoginView,
     LogoutView,
     PerfilView,
+    RegistroPublicoView,
     RegistroView,
     SetupAdminView,
     UsuarioDetailView,
@@ -16,6 +17,7 @@ urlpatterns = [
     path('logout/', LogoutView.as_view(), name='auth_logout'),
     path('perfil/', PerfilView.as_view(), name='auth_perfil'),
     path('registro/', RegistroView.as_view(), name='auth_registro'),
+    path('registro-publico/', RegistroPublicoView.as_view(), name='auth_registro_publico'),
     path('usuarios/', UsuariosListView.as_view(), name='auth_usuarios'),
     path('usuarios/<int:pk>/', UsuarioDetailView.as_view(), name='auth_usuario_detail'),
 ]

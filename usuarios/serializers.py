@@ -61,7 +61,9 @@ class UsuarioSerializer(serializers.ModelSerializer):
             return None
 
 
-class RegistroSerializer(serializers.Serializer):
+class _DatosCuentaSerializer(serializers.Serializer):
+    """Campos comunes de cuenta compartidos por el registro admin y el público."""
+
     username = serializers.CharField(max_length=150)
     email = serializers.EmailField()
     password = serializers.CharField(
@@ -69,10 +71,6 @@ class RegistroSerializer(serializers.Serializer):
     )
     first_name = serializers.CharField(max_length=150, required=False, default='')
     last_name = serializers.CharField(max_length=150, required=False, default='')
-    rol = serializers.CharField()
-
-    def validate_rol(self, value):
-        return _validar_codigo_rol(value)
 
     def validate_username(self, value):
         if User.objects.filter(username=value).exists():
@@ -84,11 +82,37 @@ class RegistroSerializer(serializers.Serializer):
             raise serializers.ValidationError('Este correo ya está registrado.')
         return value
 
+
+class RegistroSerializer(_DatosCuentaSerializer):
+    """Registro hecho por un administrador: elige el rol explícitamente."""
+
+    rol = serializers.CharField()
+
+    def validate_rol(self, value):
+        return _validar_codigo_rol(value)
+
     def create(self, validated_data):
         rol_codigo = validated_data.pop('rol')
         password = validated_data.pop('password')
         user = User.objects.create_user(password=password, **validated_data)
         rol = Rol.objects.get(codigo=rol_codigo)
+        PerfilUsuario.objects.create(usuario=user, rol=rol)
+        return user
+
+
+class RegistroPublicoSerializer(_DatosCuentaSerializer):
+    """
+    Auto-registro público, sin autenticación.
+
+    La cuenta nace con el rol 'pendiente' (sin ningún permiso). Un
+    administrador debe asignarle un rol real desde
+    PATCH /api/auth/usuarios/<id>/ antes de que pueda usar el sistema.
+    """
+
+    def create(self, validated_data):
+        password = validated_data.pop('password')
+        user = User.objects.create_user(password=password, **validated_data)
+        rol = Rol.objects.get(codigo='pendiente')
         PerfilUsuario.objects.create(usuario=user, rol=rol)
         return user
 
