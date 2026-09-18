@@ -97,7 +97,7 @@ class UsuarioSerializer(serializers.ModelSerializer):
 class _DatosCuentaSerializer(serializers.Serializer):
     """Campos comunes de cuenta compartidos por el registro admin y el público."""
 
-    username = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    username = serializers.CharField(max_length=150)
     email = serializers.EmailField()
     password = serializers.CharField(
         write_only=True, min_length=8, style={'input_type': 'password'}
@@ -120,18 +120,6 @@ class _DatosCuentaSerializer(serializers.Serializer):
         if User.objects.filter(email=value).exists():
             raise serializers.ValidationError('Este correo ya está registrado.')
         return value
-
-    def validate(self, data):
-        username = (data.get('username') or '').strip()
-        if not username:
-            username = data['email'].split('@')[0]
-            base = username
-            contador = 2
-            while User.objects.filter(username=username).exists():
-                username = f'{base}{contador}'
-                contador += 1
-            data['username'] = username
-        return data
 
 
 class RegistroSerializer(_DatosCuentaSerializer):
@@ -213,3 +201,56 @@ class ActualizarUsuarioSerializer(serializers.Serializer):
         if User.objects.filter(username=value).exclude(pk=user_id).exists():
             raise serializers.ValidationError('Este nombre de usuario ya está en uso.')
         return value
+
+
+class ActualizarPerfilPropioSerializer(serializers.Serializer):
+    username = serializers.CharField(max_length=150, required=False)
+    email = serializers.EmailField(required=False)
+    first_name = serializers.CharField(max_length=150, required=False)
+    last_name = serializers.CharField(max_length=150, required=False)
+    etnia = serializers.ChoiceField(
+        choices=PerfilUsuario.ETNIA_CHOICES,
+        required=False,
+        allow_blank=True,
+    )
+    comunidad = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    password_actual = serializers.CharField(
+        write_only=True,
+        required=False,
+        style={'input_type': 'password'},
+    )
+    password_nueva = serializers.CharField(
+        write_only=True,
+        min_length=8,
+        required=False,
+        style={'input_type': 'password'},
+    )
+
+    CAMPOS_SENSIBLES = {'username', 'email', 'password_nueva'}
+
+    def validate_username(self, value):
+        user = self.context['user']
+        if User.objects.filter(username=value).exclude(pk=user.pk).exists():
+            raise serializers.ValidationError('Este nombre de usuario ya está en uso.')
+        return value
+
+    def validate_email(self, value):
+        user = self.context['user']
+        if User.objects.filter(email=value).exclude(pk=user.pk).exists():
+            raise serializers.ValidationError('Este correo ya está en uso.')
+        return value
+
+    def validate(self, data):
+        user = self.context['user']
+        cambia_sensible = any(campo in data for campo in self.CAMPOS_SENSIBLES)
+        if cambia_sensible:
+            password_actual = data.get('password_actual')
+            if not password_actual:
+                raise serializers.ValidationError({
+                    'password_actual': ['Debes enviar tu contraseña actual para cambiar usuario, correo o contraseña.']
+                })
+            if not user.check_password(password_actual):
+                raise serializers.ValidationError({
+                    'password_actual': ['La contraseña actual no es correcta.']
+                })
+        return data

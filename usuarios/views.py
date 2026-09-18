@@ -5,6 +5,7 @@ Endpoints:
   POST /api/auth/login/               Obtener token de acceso
   POST /api/auth/logout/              Invalidar token actual
   GET  /api/auth/perfil/              Perfil del usuario autenticado
+  PATCH /api/auth/perfil/             Actualizar perfil propio
   GET  /api/auth/permisos/            Permisos efectivos del usuario autenticado
   POST /api/auth/registro/            Registrar nuevo usuario (solo admin)
   POST /api/auth/registro-publico/    Auto-registro público (nace con rol "pendiente", sin permisos)
@@ -28,6 +29,7 @@ from roles.models import Permiso, Rol
 from roles.permissions import requiere_permiso
 from .models import PerfilUsuario
 from .serializers import (
+    ActualizarPerfilPropioSerializer,
     ActualizarUsuarioSerializer,
     LoginSerializer,
     RegistroPublicoSerializer,
@@ -236,6 +238,71 @@ class PerfilView(APIView):
     def get(self, request):
         return Response(UsuarioSerializer(request.user).data)
 
+    @extend_schema(
+        tags=['Auth'],
+        summary='Actualizar perfil propio',
+        description=(
+            'Permite al usuario autenticado actualizar sus datos de perfil. '
+            'Para cambiar `username`, `email` o `password_nueva` debe enviar '
+            '`password_actual` correcta.'
+        ),
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'username': {'type': 'string', 'example': 'maria.kogui'},
+                    'email': {'type': 'string', 'example': 'maria@unimagdalena.edu.co'},
+                    'first_name': {'type': 'string', 'example': 'María'},
+                    'last_name': {'type': 'string', 'example': 'López'},
+                    'etnia': {'type': 'string', 'enum': ['arhuaco', 'kogui'], 'example': 'kogui'},
+                    'comunidad': {'type': 'string', 'example': 'Seykun'},
+                    'password_actual': {'type': 'string', 'minLength': 1},
+                    'password_nueva': {'type': 'string', 'minLength': 8},
+                },
+            }
+        },
+        responses={200: UsuarioSerializer, 400: OpenApiResponse(description='Datos inválidos')},
+    )
+    def patch(self, request):
+        user = request.user
+        serializer = ActualizarPerfilPropioSerializer(
+            data=request.data,
+            context={'user': user},
+        )
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        data = serializer.validated_data
+        password_nueva = data.pop('password_nueva', None)
+        data.pop('password_actual', None)
+        etnia = data.pop('etnia', None)
+        comunidad = data.pop('comunidad', None)
+
+        for field in ('username', 'email', 'first_name', 'last_name'):
+            if field in data:
+                setattr(user, field, data[field])
+
+        if password_nueva:
+            user.set_password(password_nueva)
+
+        user.save()
+
+        if etnia is not None or comunidad is not None:
+            perfil = user.perfil
+            update_fields = []
+            if etnia is not None:
+                perfil.etnia = etnia
+                update_fields.append('etnia')
+            if comunidad is not None:
+                perfil.comunidad = comunidad
+                update_fields.append('comunidad')
+            update_fields.append('updated_at')
+            perfil.save(update_fields=update_fields)
+
+        user.refresh_from_db()
+        logger.info('Perfil actualizado: %s', user.username)
+        return Response(UsuarioSerializer(user).data)
+
 
 class PermisosUsuarioView(APIView):
     permission_classes = [IsAuthenticated]
@@ -358,7 +425,7 @@ class RegistroView(APIView):
                         'example': 'anotador',
                     },
                 },
-                'required': ['email', 'password', 'rol'],
+                'required': ['username', 'email', 'password', 'rol'],
             }
         },
         responses={
@@ -414,7 +481,7 @@ class RegistroPublicoView(APIView):
                     'etnia': {'type': 'string', 'enum': ['arhuaco', 'kogui'], 'example': 'arhuaco'},
                     'comunidad': {'type': 'string', 'example': 'Nabusimake'},
                 },
-                'required': ['email', 'password'],
+                'required': ['username', 'email', 'password'],
             }
         },
         responses={
