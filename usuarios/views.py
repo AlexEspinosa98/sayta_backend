@@ -5,6 +5,7 @@ Endpoints:
   POST /api/auth/login/               Obtener token de acceso
   POST /api/auth/logout/              Invalidar token actual
   GET  /api/auth/perfil/              Perfil del usuario autenticado
+  GET  /api/auth/permisos/            Permisos efectivos del usuario autenticado
   POST /api/auth/registro/            Registrar nuevo usuario (solo admin)
   POST /api/auth/registro-publico/    Auto-registro público (nace con rol "pendiente", sin permisos)
   GET  /api/auth/usuarios/            Listar todos los usuarios (solo admin)
@@ -23,7 +24,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from roles.models import Rol
+from roles.models import Permiso, Rol
 from roles.permissions import requiere_permiso
 from .models import PerfilUsuario
 from .serializers import (
@@ -234,6 +235,92 @@ class PerfilView(APIView):
     )
     def get(self, request):
         return Response(UsuarioSerializer(request.user).data)
+
+
+class PermisosUsuarioView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=['Auth'],
+        summary='Permisos efectivos del usuario autenticado',
+        description=(
+            'Devuelve la foto actual del rol y permisos del usuario. El frontend '
+            'puede llamar este endpoint después del login, al recargar la página, '
+            'al volver a foco o cuando reciba un 403 para refrescar menús y acciones.'
+        ),
+        responses={200: OpenApiResponse(description='Permisos efectivos')},
+    )
+    def get(self, request):
+        user = request.user
+        try:
+            rol = user.perfil.rol
+        except PerfilUsuario.DoesNotExist:
+            rol = None
+
+        permisos_qs = Permiso.objects.none()
+        if user.is_superuser:
+            permisos_qs = Permiso.objects.filter(
+                activo=True,
+                modulo__activo=True,
+            ).select_related('modulo', 'submodulo')
+        elif rol and rol.activo:
+            permisos_qs = Permiso.objects.filter(
+                activo=True,
+                modulo__activo=True,
+                rol_permisos__rol=rol,
+            ).select_related('modulo', 'submodulo')
+
+        permisos_qs = permisos_qs.order_by('modulo__orden', 'submodulo__orden', 'codigo')
+
+        permisos = []
+        modulos = {}
+        for permiso in permisos_qs:
+            if permiso.submodulo_id:
+                key = f'{permiso.modulo.codigo}.{permiso.submodulo.codigo}.{permiso.codigo}'
+            else:
+                key = f'{permiso.modulo.codigo}.{permiso.codigo}'
+            permisos.append(key)
+
+            modulo_data = modulos.setdefault(permiso.modulo.codigo, {
+                'codigo': permiso.modulo.codigo,
+                'nombre': permiso.modulo.nombre,
+                'permisos': [],
+                'submodulos': {},
+            })
+
+            permiso_data = {
+                'id': permiso.id,
+                'codigo': permiso.codigo,
+                'nombre': permiso.nombre,
+                'key': key,
+            }
+            if permiso.submodulo_id:
+                submodulo_data = modulo_data['submodulos'].setdefault(permiso.submodulo.codigo, {
+                    'codigo': permiso.submodulo.codigo,
+                    'nombre': permiso.submodulo.nombre,
+                    'permisos': [],
+                })
+                submodulo_data['permisos'].append(permiso_data)
+            else:
+                modulo_data['permisos'].append(permiso_data)
+
+        modulos_payload = []
+        for modulo_data in modulos.values():
+            modulo_data['submodulos'] = list(modulo_data['submodulos'].values())
+            modulos_payload.append(modulo_data)
+
+        return Response({
+            'usuario': UsuarioSerializer(user).data,
+            'rol': {
+                'id': rol.id,
+                'codigo': rol.codigo,
+                'nombre': rol.nombre,
+                'activo': rol.activo,
+            } if rol else None,
+            'is_superuser': user.is_superuser,
+            'permisos': permisos,
+            'modulos': modulos_payload,
+        })
 
 
 # ──────────────────────────────────────────────────────────────────────────────
