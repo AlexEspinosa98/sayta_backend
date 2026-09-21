@@ -266,8 +266,12 @@ class PerfilView(APIView):
     )
     def patch(self, request):
         user = request.user
+        data_request = request.data.copy()
+        for campo_opcional in ('etnia', 'comunidad'):
+            if campo_opcional in data_request and data_request[campo_opcional] is None:
+                data_request[campo_opcional] = ''
         serializer = ActualizarPerfilPropioSerializer(
-            data=request.data,
+            data=data_request,
             context={'user': user},
         )
         if not serializer.is_valid():
@@ -589,8 +593,12 @@ class UsuarioDetailView(APIView):
         if not user:
             return Response({'error': 'Usuario no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
+        data_request = request.data.copy()
+        for campo_opcional in ('etnia', 'comunidad'):
+            if campo_opcional in data_request and data_request[campo_opcional] is None:
+                data_request[campo_opcional] = ''
         serializer = ActualizarUsuarioSerializer(
-            data=request.data, context={'user_id': pk}
+            data=data_request, context={'user_id': pk}
         )
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
