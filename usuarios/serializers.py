@@ -1,9 +1,13 @@
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
+from django.db import transaction
 from rest_framework import serializers
 
 from roles.models import Rol
 from .models import PerfilUsuario
+
+
+NO_ENVIADO = object()
 
 
 class LoginSerializer(serializers.Serializer):
@@ -108,8 +112,15 @@ class _DatosCuentaSerializer(serializers.Serializer):
         choices=PerfilUsuario.ETNIA_CHOICES,
         required=False,
         allow_blank=True,
+        allow_null=True,
     )
-    comunidad = serializers.CharField(max_length=150, required=False, allow_blank=True, default='')
+    comunidad = serializers.CharField(
+        max_length=150,
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        default='',
+    )
 
     def validate_username(self, value):
         if User.objects.filter(username=value).exists():
@@ -133,16 +144,17 @@ class RegistroSerializer(_DatosCuentaSerializer):
     def create(self, validated_data):
         rol_codigo = validated_data.pop('rol')
         password = validated_data.pop('password')
-        etnia = validated_data.pop('etnia', '')
-        comunidad = validated_data.pop('comunidad', '')
-        user = User.objects.create_user(password=password, **validated_data)
-        rol = Rol.objects.get(codigo=rol_codigo)
-        PerfilUsuario.objects.create(
-            usuario=user,
-            rol=rol,
-            etnia=etnia,
-            comunidad=comunidad,
-        )
+        etnia = validated_data.pop('etnia', '') or ''
+        comunidad = validated_data.pop('comunidad', '') or ''
+        with transaction.atomic():
+            user = User.objects.create_user(password=password, **validated_data)
+            rol = Rol.objects.get(codigo=rol_codigo)
+            PerfilUsuario.objects.create(
+                usuario=user,
+                rol=rol,
+                etnia=etnia,
+                comunidad=comunidad,
+            )
         return user
 
 
@@ -157,16 +169,17 @@ class RegistroPublicoSerializer(_DatosCuentaSerializer):
 
     def create(self, validated_data):
         password = validated_data.pop('password')
-        etnia = validated_data.pop('etnia', '')
-        comunidad = validated_data.pop('comunidad', '')
-        user = User.objects.create_user(password=password, **validated_data)
-        rol = Rol.objects.get(codigo='pendiente')
-        PerfilUsuario.objects.create(
-            usuario=user,
-            rol=rol,
-            etnia=etnia,
-            comunidad=comunidad,
-        )
+        etnia = validated_data.pop('etnia', '') or ''
+        comunidad = validated_data.pop('comunidad', '') or ''
+        with transaction.atomic():
+            user = User.objects.create_user(password=password, **validated_data)
+            rol = Rol.objects.get(codigo='pendiente')
+            PerfilUsuario.objects.create(
+                usuario=user,
+                rol=rol,
+                etnia=etnia,
+                comunidad=comunidad,
+            )
         return user
 
 
@@ -180,8 +193,14 @@ class ActualizarUsuarioSerializer(serializers.Serializer):
         choices=PerfilUsuario.ETNIA_CHOICES,
         required=False,
         allow_blank=True,
+        allow_null=True,
     )
-    comunidad = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    comunidad = serializers.CharField(
+        max_length=150,
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+    )
     is_active = serializers.BooleanField(required=False)
     password = serializers.CharField(
         write_only=True, min_length=8, required=False, style={'input_type': 'password'}
@@ -212,8 +231,14 @@ class ActualizarPerfilPropioSerializer(serializers.Serializer):
         choices=PerfilUsuario.ETNIA_CHOICES,
         required=False,
         allow_blank=True,
+        allow_null=True,
     )
-    comunidad = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    comunidad = serializers.CharField(
+        max_length=150,
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+    )
     password_actual = serializers.CharField(
         write_only=True,
         required=False,

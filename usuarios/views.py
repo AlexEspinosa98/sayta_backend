@@ -31,6 +31,7 @@ from .models import PerfilUsuario
 from .serializers import (
     ActualizarPerfilPropioSerializer,
     ActualizarUsuarioSerializer,
+    NO_ENVIADO,
     LoginSerializer,
     RegistroPublicoSerializer,
     RegistroSerializer,
@@ -275,8 +276,8 @@ class PerfilView(APIView):
         data = serializer.validated_data
         password_nueva = data.pop('password_nueva', None)
         data.pop('password_actual', None)
-        etnia = data.pop('etnia', None)
-        comunidad = data.pop('comunidad', None)
+        etnia = data.pop('etnia', NO_ENVIADO)
+        comunidad = data.pop('comunidad', NO_ENVIADO)
 
         for field in ('username', 'email', 'first_name', 'last_name'):
             if field in data:
@@ -287,14 +288,14 @@ class PerfilView(APIView):
 
         user.save()
 
-        if etnia is not None or comunidad is not None:
+        if etnia is not NO_ENVIADO or comunidad is not NO_ENVIADO:
             perfil = user.perfil
             update_fields = []
-            if etnia is not None:
-                perfil.etnia = etnia
+            if etnia is not NO_ENVIADO:
+                perfil.etnia = etnia or ''
                 update_fields.append('etnia')
-            if comunidad is not None:
-                perfil.comunidad = comunidad
+            if comunidad is not NO_ENVIADO:
+                perfil.comunidad = comunidad or ''
                 update_fields.append('comunidad')
             update_fields.append('updated_at')
             perfil.save(update_fields=update_fields)
@@ -597,8 +598,8 @@ class UsuarioDetailView(APIView):
         data = serializer.validated_data
         rol = data.pop('rol', None)
         password = data.pop('password', None)
-        etnia = data.pop('etnia', None)
-        comunidad = data.pop('comunidad', None)
+        etnia = data.pop('etnia', NO_ENVIADO)
+        comunidad = data.pop('comunidad', NO_ENVIADO)
 
         for field, value in data.items():
             setattr(user, field, value)
@@ -621,14 +622,14 @@ class UsuarioDetailView(APIView):
             # muestre el rol recién asignado, no el anterior.
             user.refresh_from_db()
 
-        if etnia is not None or comunidad is not None:
+        if etnia is not NO_ENVIADO or comunidad is not NO_ENVIADO:
             perfil = user.perfil
             update_fields = []
-            if etnia is not None:
-                perfil.etnia = etnia
+            if etnia is not NO_ENVIADO:
+                perfil.etnia = etnia or ''
                 update_fields.append('etnia')
-            if comunidad is not None:
-                perfil.comunidad = comunidad
+            if comunidad is not NO_ENVIADO:
+                perfil.comunidad = comunidad or ''
                 update_fields.append('comunidad')
             update_fields.append('updated_at')
             perfil.save(update_fields=update_fields)
