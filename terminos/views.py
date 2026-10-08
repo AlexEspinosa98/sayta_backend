@@ -34,13 +34,15 @@ from drf_spectacular.utils import (
     extend_schema_view,
     inline_serializer,
 )
-from rest_framework import filters, mixins, status, viewsets
+from rest_framework import filters, mixins, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import JSONParser, MultiPartParser
 from rest_framework.response import Response
 
 from roles.permissions import requiere_permiso
+from roles.services import tiene_permiso
+from roles.services import tiene_permiso
 from .models import EmbeddingVersion, Lengua, TerminoEs, TerminoLeng
 from .serializers import (
     CargaMasivaResponseSerializer,
@@ -159,6 +161,22 @@ class PermisoPorAccionMixin:
 )
 class LenguaViewSet(PermisoPorAccionMixin, viewsets.ModelViewSet):
     modulo_permiso = 'glosario'
+
+    # El catálogo de lenguas es la lista desplegable de Traductor, Transcribir y Etiquetado: quien
+    # puede traducir, transcribir o ver audios necesita LEERLO aunque no tenga "glosario.ver"
+    # (p. ej. el anotador). Crear/editar/eliminar siguen exigiendo permisos de glosario.
+    _LECTURA_ALTERNATIVAS = (
+        ('traduccion', 'ejecutar'),
+        ('transcripcion', 'ejecutar'),
+        ('dataset_audio', 'ver'),
+    )
+
+    def get_permissions(self):
+        if self.action in ('list', 'retrieve'):
+            user = self.request.user
+            if any(tiene_permiso(user, m, a) for m, a in self._LECTURA_ALTERNATIVAS):
+                return [permissions.IsAuthenticated()]
+        return super().get_permissions()
     queryset = Lengua.objects.all()
     serializer_class = LenguaSerializer
     pagination_class = StandardPagination
