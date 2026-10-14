@@ -20,6 +20,7 @@ Endpoints expuestos:
 """
 
 import json
+import re
 import logging
 
 from django.db import transaction
@@ -294,6 +295,12 @@ class TerminoLengViewSet(PermisoPorAccionMixin, viewsets.ModelViewSet):
     search_fields = ['termino', 'definicion']
     ordering_fields = ['termino', 'created_at', 'updated_at']
     ordering = ['termino']
+
+    def get_permissions(self):
+        # Descargar el glosario es exclusivo del administrador (rol con permisos sobre usuarios).
+        if self.action == 'glosarios':
+            return [requiere_permiso('usuarios', 'gestionar_roles')()]
+        return super().get_permissions()
 
     def get_serializer_class(self):
         if self.action in ('create', 'update', 'partial_update'):
@@ -639,6 +646,42 @@ class TerminoLengViewSet(PermisoPorAccionMixin, viewsets.ModelViewSet):
         Exporta los términos por lengua en el mismo formato usado en carga-masiva,
         diferenciados por código de lengua, listo para descargar y revisar.
         """
+        activo_param = request.query_params.get('activo')
+        activo_filtro = None
+        if activo_param is not None:
+            activo_filtro = activo_param.strip().lower() in ('true', '1', 'si', 'sí')
+
+        lengua_id = request.query_params.get('lengua_id')
+        if lengua_id:
+            # Exportación inequívoca por id (el código de las lenguas no es consistente en producción):
+            # `lengua_id=<id>` o `lengua_id=todas`. La salida usa el mismo formato que la carga masiva.
+            lenguas = Lengua.objects.all().order_by('nombre')
+            if lengua_id.strip().lower() not in ('todas', 'all'):
+                if not lengua_id.isdigit():
+                    return Response({'error': 'lengua_id debe ser un número o "todas".'}, status=status.HTTP_400_BAD_REQUEST)
+                lenguas = lenguas.filter(pk=int(lengua_id))
+                if not lenguas.exists():
+                    return Response({'error': 'Lengua no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+            resultado = {}
+            for lg in lenguas:
+                qs = TerminoLeng.objects.filter(lengua=lg).select_related('termino_es').order_by('termino')
+                if activo_filtro is not None:
+                    qs = qs.filter(activo=activo_filtro)
+                resultado[lg.codigo or lg.nombre] = [
+                    {
+                        'termino': t.termino, 'definicion': t.definicion, 'pos': t.pos,
+                        'termino_es': t.termino_es.termino if t.termino_es else None,
+                        'sinonimos': t.sinonimos, 'ejemplos': t.ejemplos,
+                        'tipo_morfema': t.tipo_morfema, 'activo': t.activo,
+                    }
+                    for t in qs
+                ]
+            nombre = (lenguas[0].codigo or lenguas[0].nombre) if len(resultado) == 1 else 'todas_las_lenguas'
+            nombre = re.sub(r'[^A-Za-z0-9._-]+', '_', str(nombre)).strip('_') or 'glosario'
+            resp = HttpResponse(json.dumps(resultado, ensure_ascii=False, indent=2), content_type='application/json; charset=utf-8')
+            resp['Content-Disposition'] = f'attachment; filename="glosario_{nombre}.json"'
+            return resp
+
         codigos_param = request.query_params.get('codigos', 'kogui,arhuaco')
         codigos_canonicos = []
         for crudo in codigos_param.split(','):
@@ -648,11 +691,6 @@ class TerminoLengViewSet(PermisoPorAccionMixin, viewsets.ModelViewSet):
             canonico = GLOSARIO_CODIGOS_ALIAS.get(crudo, crudo)
             if canonico not in codigos_canonicos:
                 codigos_canonicos.append(canonico)
-
-        activo_param = request.query_params.get('activo')
-        activo_filtro = None
-        if activo_param is not None:
-            activo_filtro = activo_param.strip().lower() in ('true', '1', 'si', 'sí')
 
         resultado = {}
         for codigo in codigos_canonicos:
