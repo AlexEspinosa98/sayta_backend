@@ -17,7 +17,7 @@ from rest_framework.exceptions import AuthenticationFailed
 from .services import registrar_auditoria, tiene_permiso
 
 
-def requiere_permiso_django(modulo_codigo: str, accion_codigo):
+def requiere_permiso_django(modulo_codigo: str, accion_codigo, auditar: bool = True):
     """
     accion_codigo puede ser un string (misma acción para todos los métodos) o un
     dict {"GET": "ver", "PUT": "etiquetar", "DELETE": "eliminar"} para vistas que
@@ -52,7 +52,8 @@ def requiere_permiso_django(modulo_codigo: str, accion_codigo):
                     status=403,
                 )
 
-            registrar_auditoria(request, modulo_codigo, accion)
+            if auditar:
+                registrar_auditoria(request, modulo_codigo, accion)
             return view_func(request, *args, **kwargs)
 
         return wrapped

@@ -1,4 +1,5 @@
 import json
+import logging
 import mimetypes
 import os
 import re
@@ -12,6 +13,7 @@ from django.conf import settings
 from django.http import FileResponse, JsonResponse, HttpRequest, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from roles.decorators import requiere_permiso_django
+from .models import EtiquetaHistorial
 from .schema import OPENAPI_SCHEMA
 from .search_engine import load_metadata as se_load_metadata, semantic_search
 
@@ -711,13 +713,34 @@ def session_glosario_view(request: HttpRequest, community: str, session: str):
     return JsonResponse(data, safe=False)
 
 
+def _nombre_usuario(user) -> str:
+    if not user or not getattr(user, 'is_authenticated', False):
+        return ''
+    completo = f"{user.first_name} {user.last_name}".strip()
+    return completo or user.get_username()
+
+
+def _registrar_historial(request, community_dir, session_dir, audio: str, accion: str,
+                         anterior: str = '', nueva: str = ''):
+    """Deja constancia de quién creó, editó o eliminó una etiqueta (nunca bloquea el guardado)."""
+    try:
+        EtiquetaHistorial.objects.create(
+            comunidad=community_dir.name, jornada=session_dir.name, audio=audio, accion=accion,
+            etiqueta_anterior=anterior, etiqueta_nueva=nueva,
+            usuario=request.user if getattr(request.user, 'is_authenticated', False) else None,
+            usuario_nombre=_nombre_usuario(request.user),
+        )
+    except Exception:  # el rastro no debe impedir el trabajo de etiquetado
+        logging.getLogger(__name__).exception('No se pudo registrar el historial de etiquetas')
+
+
 @requiere_permiso_django('dataset_audio', 'etiquetar')
 @csrf_exempt
 def session_etiquetar_view(request: HttpRequest, community: str, session: str):
     if request.method != "POST":
         return JsonResponse({"error": "Método no permitido"}, status=405)
 
-    _, session_dir, err = _get_session_or_404(community, session)
+    community_dir, session_dir, err = _get_session_or_404(community, session)
     if err:
         return err
 
@@ -747,6 +770,7 @@ def session_etiquetar_view(request: HttpRequest, community: str, session: str):
         )
 
     txt_path.write_text(etiqueta, encoding="utf-8")
+    _registrar_historial(request, community_dir, session_dir, nombre_audio, 'crear', '', etiqueta)
     return JsonResponse({
         "mensaje": "Etiqueta creada.",
         "audio_origen": str(audio_path),
@@ -760,7 +784,7 @@ def session_etiquetar_view(request: HttpRequest, community: str, session: str):
 @requiere_permiso_django('dataset_audio', {'GET': 'ver', 'PUT': 'etiquetar', 'DELETE': 'eliminar'})
 @csrf_exempt
 def session_etiqueta_view(request: HttpRequest, community: str, session: str, filename: str):
-    _, session_dir, err = _get_session_or_404(community, session)
+    community_dir, session_dir, err = _get_session_or_404(community, session)
     if err:
         return err
 
@@ -785,13 +809,20 @@ def session_etiqueta_view(request: HttpRequest, community: str, session: str, fi
         if not etiqueta:
             return JsonResponse({"error": "Falta el campo 'etiqueta'."}, status=400)
         (session_dir / "audios_procesados").mkdir(exist_ok=True)
+        existia = txt_path.exists()
+        anterior = txt_path.read_text(encoding="utf-8").strip() if existia else ''
         txt_path.write_text(etiqueta, encoding="utf-8")
+        if not existia or anterior != etiqueta:
+            _registrar_historial(request, community_dir, session_dir, filename,
+                                 'editar' if existia else 'crear', anterior, etiqueta)
         return JsonResponse({"mensaje": "Etiqueta actualizada.", "audio": filename, "etiqueta": etiqueta})
 
     if request.method == "DELETE":
         if not txt_path.exists():
             return JsonResponse({"error": "Etiqueta no encontrada."}, status=404)
+        anterior = txt_path.read_text(encoding="utf-8").strip()
         txt_path.unlink()
+        _registrar_historial(request, community_dir, session_dir, filename, 'eliminar', anterior, '')
         return JsonResponse({"mensaje": "Etiqueta eliminada.", "audio": filename})
 
     return JsonResponse({"error": "Método no permitido"}, status=405)
@@ -837,3 +868,110 @@ def session_estado_view(request: HttpRequest, community: str, session: str):
         "etiquetados": etiquetados,
         "sin_etiquetar": sin_etiquetar,
     })
+
+
+# =============================
+# Autoría de las etiquetas (solo administrador)
+# =============================
+
+def _rol_codigo(user) -> str:
+    try:
+        return user.perfil.rol.codigo
+    except Exception:
+        return ''
+
+
+def _evento_a_dict(e: EtiquetaHistorial) -> Dict:
+    return {
+        "id": e.id,
+        "comunidad": e.comunidad,
+        "jornada": e.jornada,
+        "audio": e.audio,
+        "accion": e.accion,
+        "etiqueta_anterior": e.etiqueta_anterior,
+        "etiqueta_nueva": e.etiqueta_nueva,
+        "usuario_id": e.usuario_id,
+        "usuario": e.usuario_nombre or (e.usuario.get_username() if e.usuario_id else "Desconocido"),
+        "rol": _rol_codigo(e.usuario) if e.usuario_id else "",
+        "fecha": e.creado_en.isoformat(),
+        "aproximado": e.aproximado,
+        "origen": e.origen,
+    }
+
+
+@requiere_permiso_django('usuarios', 'gestionar_roles', auditar=False)
+def session_etiquetado_info_view(request: HttpRequest, community: str, session: str):
+    """GET: por cada audio de la jornada, quién creó su etiqueta y quién la editó por última vez."""
+    if request.method != "GET":
+        return JsonResponse({"error": "Método no permitido"}, status=405)
+    community_dir, session_dir, err = _get_session_or_404(community, session)
+    if err:
+        return err
+
+    info: Dict[str, Dict] = {}
+    eventos = (EtiquetaHistorial.objects.filter(comunidad=community_dir.name, jornada=session_dir.name)
+               .select_related('usuario').order_by('creado_en', 'id'))
+    for e in eventos:
+        d = info.setdefault(e.audio, {
+            "creado_por": None, "creado_en": None, "creado_aproximado": False,
+            "editado_por": None, "editado_en": None, "ediciones": 0, "eliminado": False,
+        })
+        nombre = e.usuario_nombre or (e.usuario.get_username() if e.usuario_id else "Desconocido")
+        if e.accion == 'crear':
+            d.update(creado_por=nombre, creado_en=e.creado_en.isoformat(),
+                     creado_aproximado=e.aproximado, eliminado=False)
+        elif e.accion == 'editar':
+            d.update(editado_por=nombre, editado_en=e.creado_en.isoformat(), eliminado=False)
+            d["ediciones"] += 1
+        elif e.accion == 'eliminar':
+            d["eliminado"] = True
+    return JsonResponse({"comunidad": community_dir.name, "jornada": session_dir.name, "audios": info})
+
+
+@requiere_permiso_django('usuarios', 'gestionar_roles', auditar=False)
+def session_etiqueta_historial_view(request: HttpRequest, community: str, session: str, filename: str):
+    """GET: todos los cambios de la etiqueta de un audio (quién, cuándo, de qué texto a cuál)."""
+    if request.method != "GET":
+        return JsonResponse({"error": "Método no permitido"}, status=405)
+    community_dir, session_dir, err = _get_session_or_404(community, session)
+    if err:
+        return err
+    eventos = (EtiquetaHistorial.objects
+               .filter(comunidad=community_dir.name, jornada=session_dir.name, audio=filename)
+               .select_related('usuario').order_by('-creado_en', '-id'))
+    return JsonResponse({"audio": filename, "eventos": [_evento_a_dict(e) for e in eventos]})
+
+
+@requiere_permiso_django('usuarios', 'gestionar_roles', auditar=False)
+def etiquetado_actividad_view(request: HttpRequest):
+    """GET ?comunidad=&jornada=&limite=: resumen por persona y últimos cambios de etiquetas."""
+    if request.method != "GET":
+        return JsonResponse({"error": "Método no permitido"}, status=405)
+    from django.db.models import Count, Max, Min, Q
+
+    qs = EtiquetaHistorial.objects.all()
+    comunidad = request.GET.get("comunidad")
+    jornada = request.GET.get("jornada")
+    if comunidad:
+        qs = qs.filter(comunidad__iexact=comunidad)
+    if jornada:
+        qs = qs.filter(jornada__iexact=jornada)
+    try:
+        limite = max(1, min(int(request.GET.get("limite", 100)), 500))
+    except ValueError:
+        limite = 100
+
+    resumen = (qs.values('usuario_id', 'usuario_nombre')
+               .annotate(creadas=Count('id', filter=Q(accion='crear')),
+                         editadas=Count('id', filter=Q(accion='editar')),
+                         eliminadas=Count('id', filter=Q(accion='eliminar')),
+                         primera=Min('creado_en'), ultima=Max('creado_en'))
+               .order_by('-ultima'))
+    usuarios = [{
+        "usuario_id": r['usuario_id'], "usuario": r['usuario_nombre'] or "Desconocido",
+        "creadas": r['creadas'], "editadas": r['editadas'], "eliminadas": r['eliminadas'],
+        "primera": r['primera'].isoformat() if r['primera'] else None,
+        "ultima": r['ultima'].isoformat() if r['ultima'] else None,
+    } for r in resumen]
+    recientes = [_evento_a_dict(e) for e in qs.select_related('usuario').order_by('-creado_en', '-id')[:limite]]
+    return JsonResponse({"usuarios": usuarios, "recientes": recientes, "total_eventos": qs.count()})
