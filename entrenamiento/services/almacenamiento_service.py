@@ -102,6 +102,14 @@ def eliminar_modelo(exp: Exp) -> int:
     if exp.estado == Exp.ESTADO_ACTIVO or exp.is_active:
         raise AlmacenamientoError('Es el modelo ACTIVO de su lengua: activa otro modelo antes de eliminarlo.')
     carpeta = carpeta_segura(str(exp.id))
+    # Un reentrenamiento hecho sobre pesos completos de este modelo necesita esta carpeta para funcionar.
+    dependientes = [h.nombre for h in Exp.objects.filter(reentrenado_de=exp, modelo_eliminado_en__isnull=True)
+                    if (h.config_entrenamiento or {}).get('depende_de_ruta') == (exp.ruta_modelo_entrenado or str(carpeta))
+                    and h.estado in (Exp.ESTADO_COMPLETADO, Exp.ESTADO_ACTIVO)]
+    if dependientes:
+        raise AlmacenamientoError(
+            'Hay modelos reentrenados a partir de este que lo necesitan: ' + ', '.join(dependientes) +
+            '. Bórralos primero o conserva este modelo.')
     liberado = tamano(carpeta) if carpeta.exists() else 0
     if carpeta.exists():
         shutil.rmtree(carpeta, ignore_errors=True)

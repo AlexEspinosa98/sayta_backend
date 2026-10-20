@@ -343,6 +343,7 @@ def _run_training(exp, samples: List[Dict], config: Dict, task_id: str,
             'warmup_steps': config.get('warmup_steps', 100),
             'weight_decay': config.get('weight_decay', 0.005),
             'use_peft': config.get('use_peft', False),
+            'reentrenado_de': config.get('reentrenado_de') or 'ninguno',
             'use_cv': use_cv,
             'cv_folds': cv_folds if use_cv else 1,
             'fp16': use_fp16,
@@ -493,7 +494,7 @@ def _run_single_split(exp, samples, config, tipo, modelo_hf, ruta_local,
 
         mlflow.log_params({'num_train': len(train_ds), 'num_eval': len(eval_ds)})
 
-        if config.get('use_peft', False):
+        if config.get('use_peft', False) and not config.get('_adapter_ya_aplicado'):
             model = _apply_peft(model, tipo, config)
 
         training_args = _build_training_args(tipo, output_dir, config, use_fp16)
@@ -595,7 +596,7 @@ def _run_cross_validation(exp, samples, config, tipo, modelo_hf, ruta_local,
         model, processor = _load_model_for_training(
             tipo, modelo_hf, ruta_local, fold_samples_train, config
         )
-        if config.get('use_peft', False):
+        if config.get('use_peft', False) and not config.get('_adapter_ya_aplicado'):
             model = _apply_peft(model, tipo, config)
 
         train_ds, _ = _build_hf_dataset(fold_samples_train, processor, tipo)
@@ -747,6 +748,9 @@ def _load_model_for_training(tipo: str, modelo_hf: str, ruta_local: str,
     """Carga modelo y construye procesador listo para entrenamiento."""
     src = ruta_local if ruta_local else modelo_hf
 
+    if tipo == 'whisper' and config.get('modelo_inicial_ruta'):
+        return _cargar_whisper_para_reentrenar(config['modelo_inicial_ruta'], src, config)
+
     if tipo == 'whisper':
         from transformers import WhisperForConditionalGeneration, WhisperProcessor
         language = config.get('whisper_language', 'es')
@@ -809,6 +813,44 @@ def _load_model_for_training(tipo: str, modelo_hf: str, ruta_local: str,
         elif hasattr(model, 'freeze_feature_extractor'):
             model.freeze_feature_extractor()
         return model, processor
+
+
+def _cargar_whisper_para_reentrenar(ruta_modelo: str, base_src: str, config: Dict):
+    """
+    Reentrenamiento: continúa el entrenamiento de un modelo Whisper ya entrenado con datos nuevos.
+
+    * Si la carpeta tiene un adaptador LoRA (adapter_config.json): se carga el Whisper base y se le
+      acopla ese MISMO adaptador en modo entrenable, así que el resultado sigue siendo un adaptador
+      sobre el modelo base original (no se crea un segundo LoRA: `_adapter_ya_aplicado`).
+    * Si tiene pesos completos: se cargan esos pesos como punto de partida.
+    """
+    from transformers import WhisperForConditionalGeneration, WhisperProcessor
+    language = config.get('whisper_language', 'es')
+    task = config.get('whisper_task', 'transcribe')
+    carpeta = Path(ruta_modelo)
+
+    tiene_procesador = (carpeta / 'preprocessor_config.json').exists() or (carpeta / 'processor_config.json').exists()
+    processor = WhisperProcessor.from_pretrained(str(carpeta) if tiene_procesador else base_src,
+                                                 language=language, task=task)
+
+    if (carpeta / 'adapter_config.json').exists():
+        from peft import PeftModel
+        base = WhisperForConditionalGeneration.from_pretrained(base_src)
+        model = PeftModel.from_pretrained(base, str(carpeta), is_trainable=True)
+        config['_adapter_ya_aplicado'] = True
+        logger.info('Reentrenando adaptador LoRA existente: %s', carpeta)
+    else:
+        model = WhisperForConditionalGeneration.from_pretrained(str(carpeta))
+        logger.info('Reentrenando desde pesos completos: %s', carpeta)
+
+    model.config.use_cache = False
+    try:
+        model.generation_config.language = language
+        model.generation_config.task = task
+        model.generation_config.forced_decoder_ids = None
+    except Exception:  # PeftModel: la config de generación vive en el modelo envuelto
+        pass
+    return model, processor
 
 
 def _load_audio_16k(audio_path: str):

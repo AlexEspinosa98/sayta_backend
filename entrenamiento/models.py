@@ -108,6 +108,10 @@ class ExperimentoEntrenamiento(models.Model):
     # Limpieza de almacenamiento: los archivos del modelo/checkpoints se pueden borrar para liberar
     # disco SIN perder el registro del experimento ni sus métricas (MLflow y `metricas`).
     modelo_eliminado_en = models.DateTimeField(null=True, blank=True)
+    # Si este experimento continuó el entrenamiento de otro modelo ya entrenado (reentrenamiento con más datos).
+    reentrenado_de = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL, related_name='reentrenamientos',
+    )
     bytes_liberados = models.BigIntegerField(default=0)
 
     class Meta:

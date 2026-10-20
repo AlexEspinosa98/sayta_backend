@@ -20,6 +20,7 @@ class ExperimentoListSerializer(serializers.ModelSerializer):
     lengua_nombre = serializers.CharField(source='lengua.nombre', read_only=True)
     modelo_nombre = serializers.CharField(source='modelo_base.nombre_hf', read_only=True)
     estado_display = serializers.CharField(source='get_estado_display', read_only=True)
+    reentrenado_de_nombre = serializers.CharField(source='reentrenado_de.nombre', read_only=True, default=None)
 
     class Meta:
         model = ExperimentoEntrenamiento
@@ -28,7 +29,7 @@ class ExperimentoListSerializer(serializers.ModelSerializer):
             'modelo_nombre', 'comunidades_usadas', 'estado', 'estado_display',
             'is_active', 'num_muestras_train', 'num_muestras_eval',
             'metricas', 'created_at', 'completed_at',
-            'modelo_eliminado_en', 'bytes_liberados',
+            'modelo_eliminado_en', 'bytes_liberados', 'reentrenado_de', 'reentrenado_de_nombre',
         ]
 
 
@@ -37,6 +38,7 @@ class ExperimentoDetailSerializer(serializers.ModelSerializer):
     lengua_nombre = serializers.CharField(source='lengua.nombre', read_only=True)
     modelo_base_info = ModeloAudioSerializer(source='modelo_base', read_only=True)
     estado_display = serializers.CharField(source='get_estado_display', read_only=True)
+    reentrenado_de_nombre = serializers.CharField(source='reentrenado_de.nombre', read_only=True, default=None)
 
     class Meta:
         model = ExperimentoEntrenamiento
@@ -48,6 +50,7 @@ class ExperimentoDetailSerializer(serializers.ModelSerializer):
             'mlflow_tracking_uri', 'metricas', 'num_muestras_train',
             'num_muestras_eval', 'error_mensaje', 'task_id',
             'created_at', 'completed_at', 'modelo_eliminado_en', 'bytes_liberados',
+            'reentrenado_de', 'reentrenado_de_nombre',
         ]
 
 
@@ -203,6 +206,17 @@ class EntrenarRequestSerializer(serializers.Serializer):
     )
     modelo_audio_id = serializers.IntegerField(
         help_text='ID del ModeloAudio descargado (ver GET /api/entrenamiento/modelos/)',
+    )
+
+    experimento_base_id = serializers.UUIDField(
+        required=False,
+        allow_null=True,
+        default=None,
+        help_text=(
+            'Opcional: ID de un experimento ya entrenado (completado o activo) del que se CONTINÚA el '
+            'entrenamiento con los datos seleccionados (reentrenamiento). Si se omite, se entrena desde el '
+            'modelo base (p. ej. Whisper).'
+        ),
     )
 
     # ── Selección de dataset — exactamente uno de estos tres debe estar presente ──
