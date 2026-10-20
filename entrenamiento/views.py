@@ -42,7 +42,7 @@ from .serializers import (
     TranscribirTraducirRequestSerializer,
     SesionSerializer,
 )
-from .services import augmentation_service, dataset_service, model_service, training_service
+from .services import almacenamiento_service, augmentation_service, dataset_service, model_service, training_service
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,7 @@ LiberarMemoria = requiere_permiso('modelos_asr', 'liberar_memoria')
 VerDatasetAudio = requiere_permiso('dataset_audio', 'ver')
 SubirDatasetAudio = requiere_permiso('dataset_audio', 'subir')
 EjecutarTranscripcion = requiere_permiso('transcripcion', 'ejecutar')
+SoloAdministrador = requiere_permiso('usuarios', 'gestionar_roles')
 
 
 # ======================================================================
@@ -1422,3 +1423,101 @@ def _get_active_experiment(lengua_id: int):
         )
 
     return exp, None
+
+
+# ======================================================================
+# Almacenamiento de modelos (solo administrador)
+# ======================================================================
+
+class AlmacenamientoView(APIView):
+    """GET: cuánto ocupa cada experimento y cuánto se puede liberar sin perder estadísticas."""
+    permission_classes = [SoloAdministrador]
+
+    def get(self, request):
+        return Response(almacenamiento_service.resumen_almacenamiento())
+
+
+class ExperimentoLimpiarView(APIView):
+    """
+    POST {modo: "checkpoints" | "modelo"}
+      checkpoints -> borra checkpoints y audios aumentados; conserva el modelo final.
+      modelo      -> borra toda la carpeta (no permitido para el modelo activo).
+    El registro del experimento y sus métricas (MLflow) siempre se conservan.
+    """
+    permission_classes = [SoloAdministrador]
+
+    def post(self, request, pk):
+        try:
+            exp = ExperimentoEntrenamiento.objects.get(pk=pk)
+        except ExperimentoEntrenamiento.DoesNotExist:
+            return Response({'error': 'Experimento no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        modo = request.data.get('modo')
+        try:
+            if modo == 'checkpoints':
+                liberado = almacenamiento_service.limpiar_checkpoints(exp)
+            elif modo == 'modelo':
+                liberado = almacenamiento_service.eliminar_modelo(exp)
+            else:
+                return Response({'error': 'modo debe ser "checkpoints" o "modelo".'}, status=status.HTTP_400_BAD_REQUEST)
+        except almacenamiento_service.AlmacenamientoError as e:
+            return Response({'error': str(e)}, status=status.HTTP_409_CONFLICT)
+        logger.info('Limpieza por %s: exp=%s modo=%s', request.user, exp.id, modo)
+        return Response({'experimento_id': str(exp.id), 'modo': modo, 'liberado_bytes': liberado})
+
+
+class AlmacenamientoLimpiarView(APIView):
+    """POST {modo: "checkpoints" | "fallidos" | "huerfanas"}: limpieza masiva."""
+    permission_classes = [SoloAdministrador]
+
+    def post(self, request):
+        try:
+            res = almacenamiento_service.limpiar_masivo(request.data.get('modo'))
+        except almacenamiento_service.AlmacenamientoError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        logger.info('Limpieza masiva por %s: %s', request.user, res)
+        return Response(res)
+
+
+# ======================================================================
+# Acceso a MLflow (solo administrador)
+# ======================================================================
+
+MLFLOW_COOKIE = 'mlflow_acceso'
+MLFLOW_SALT = 'sayta-mlflow-acceso'
+MLFLOW_MAX_AGE = 8 * 3600
+
+
+class MlflowAccesoView(APIView):
+    """
+    POST: un administrador autenticado recibe una cookie firmada y de corta duración (8 h) que
+    el nginx comprueba (auth_request) antes de dejarlo entrar a /mlflow/.
+    """
+    permission_classes = [SoloAdministrador]
+
+    def post(self, request):
+        from django.core import signing
+        token = signing.dumps({'u': request.user.id}, salt=MLFLOW_SALT)
+        resp = Response({'url': '/mlflow/'})
+        resp.set_cookie(MLFLOW_COOKIE, token, max_age=MLFLOW_MAX_AGE, path='/mlflow/',
+                        httponly=True, secure=True, samesite='Lax')
+        return resp
+
+
+class MlflowVerificarView(APIView):
+    """Uso interno del nginx (auth_request): 204 si la cookie es válida y el usuario sigue siendo admin."""
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request):
+        from django.contrib.auth import get_user_model
+        from django.core import signing
+        from django.http import HttpResponse
+        from roles.services import tiene_permiso
+        try:
+            datos = signing.loads(request.COOKIES.get(MLFLOW_COOKIE, ''), salt=MLFLOW_SALT, max_age=MLFLOW_MAX_AGE)
+        except signing.BadSignature:
+            return HttpResponse(status=401)
+        user = get_user_model().objects.filter(pk=datos.get('u'), is_active=True).first()
+        if not user or not tiene_permiso(user, 'usuarios', 'gestionar_roles'):
+            return HttpResponse(status=401)
+        return HttpResponse(status=204)

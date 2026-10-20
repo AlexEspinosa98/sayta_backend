@@ -28,6 +28,7 @@ class ExperimentoListSerializer(serializers.ModelSerializer):
             'modelo_nombre', 'comunidades_usadas', 'estado', 'estado_display',
             'is_active', 'num_muestras_train', 'num_muestras_eval',
             'metricas', 'created_at', 'completed_at',
+            'modelo_eliminado_en', 'bytes_liberados',
         ]
 
 
@@ -46,7 +47,7 @@ class ExperimentoDetailSerializer(serializers.ModelSerializer):
             'mlflow_run_id', 'mlflow_experiment_id', 'mlflow_experiment_name',
             'mlflow_tracking_uri', 'metricas', 'num_muestras_train',
             'num_muestras_eval', 'error_mensaje', 'task_id',
-            'created_at', 'completed_at',
+            'created_at', 'completed_at', 'modelo_eliminado_en', 'bytes_liberados',
         ]
 
 

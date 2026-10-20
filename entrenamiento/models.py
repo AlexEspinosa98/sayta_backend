@@ -105,6 +105,11 @@ class ExperimentoEntrenamiento(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
+    # Limpieza de almacenamiento: los archivos del modelo/checkpoints se pueden borrar para liberar
+    # disco SIN perder el registro del experimento ni sus métricas (MLflow y `metricas`).
+    modelo_eliminado_en = models.DateTimeField(null=True, blank=True)
+    bytes_liberados = models.BigIntegerField(default=0)
+
     class Meta:
         db_table = 'experimentos_entrenamiento'
         ordering = ['-created_at']
