@@ -215,7 +215,8 @@ class EntrenarRequestSerializer(serializers.Serializer):
         help_text=(
             'Opcional: ID de un experimento ya entrenado (completado o activo) del que se CONTINÚA el '
             'entrenamiento con los datos seleccionados (reentrenamiento). Si se omite, se entrena desde el '
-            'modelo base (p. ej. Whisper).'
+            'modelo base (p. ej. Whisper). Puede ser de OTRA lengua (transferencia entre lenguas): se parten de sus pesos '
+            'y se afina con los datos de la lengua elegida.'
         ),
     )
 

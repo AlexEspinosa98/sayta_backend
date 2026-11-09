@@ -666,14 +666,13 @@ class EntrenarView(APIView):
         exp_base = None
         if data.get('experimento_base_id'):
             try:
-                exp_base = ExperimentoEntrenamiento.objects.select_related('modelo_base').get(pk=data['experimento_base_id'])
+                exp_base = ExperimentoEntrenamiento.objects.select_related('modelo_base', 'lengua').get(pk=data['experimento_base_id'])
             except ExperimentoEntrenamiento.DoesNotExist:
                 return Response({'error': 'El experimento a reentrenar no existe.'}, status=status.HTTP_404_NOT_FOUND)
             if exp_base.estado not in (ExperimentoEntrenamiento.ESTADO_COMPLETADO, ExperimentoEntrenamiento.ESTADO_ACTIVO):
                 return Response({'error': f'Solo se pueden reentrenar modelos completados o activos (estado actual: "{exp_base.estado}").'},
                                 status=status.HTTP_422_UNPROCESSABLE_ENTITY)
-            if exp_base.lengua_id != lengua.id:
-                return Response({'error': 'El modelo a reentrenar pertenece a otra lengua.'}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+            # La base puede ser de OTRA lengua (transferencia entre lenguas): se parte de sus pesos y se afina con la lengua elegida.
             if exp_base.modelo_base_id != modelo_audio.id:
                 return Response({'error': f'Para reentrenar hay que usar el mismo modelo base ({exp_base.modelo_base.nombre_hf}).'},
                                 status=status.HTTP_422_UNPROCESSABLE_ENTITY)
@@ -692,6 +691,8 @@ class EntrenarView(APIView):
         if exp_base is not None:
             config['modelo_inicial_ruta'] = ruta_base
             config['reentrenado_de'] = str(exp_base.id)
+            if exp_base.lengua_id != lengua.id:
+                config['base_lengua'] = exp_base.lengua.codigo
             # Si el modelo de partida son pesos completos (no un adaptador LoRA), el nuevo modelo depende de esa carpeta.
             if not (Path(ruta_base) / 'adapter_config.json').exists():
                 config['depende_de_ruta'] = ruta_base
