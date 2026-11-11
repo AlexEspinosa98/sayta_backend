@@ -42,7 +42,7 @@ from .serializers import (
     TranscribirTraducirRequestSerializer,
     SesionSerializer,
 )
-from .services import almacenamiento_service, augmentation_service, dataset_service, model_service, training_service
+from .services import almacenamiento_service, augmentation_service, dataset_service, model_service, progreso_service, training_service
 
 logger = logging.getLogger(__name__)
 
@@ -858,6 +858,45 @@ class ExperimentoEstadoView(APIView):
             'error_mensaje': exp.error_mensaje,
             'created_at': exp.created_at,
             'completed_at': exp.completed_at,
+        })
+
+
+class ExperimentoProgresoView(APIView):
+    """Progreso en vivo (época, paso, pérdida, latido) de un entrenamiento. Lo escribe el hilo de entrenamiento."""
+    permission_classes = [VerModelosAsr]
+
+    @extend_schema(
+        tags=['Entrenamiento — Experimentos'],
+        summary='Progreso en vivo de un entrenamiento',
+        description='Época, paso, pérdida, tasa de aprendizaje, tiempo restante estimado e historial de evaluaciones (WER/CER/PER).',
+        responses={200: OpenApiResponse(description='Progreso actual'), 404: OpenApiResponse(description='No encontrado')},
+    )
+    def get(self, request, pk):
+        try:
+            exp = ExperimentoEntrenamiento.objects.select_related('lengua', 'modelo_base').get(pk=pk)
+        except ExperimentoEntrenamiento.DoesNotExist:
+            return Response({'error': 'Experimento no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(progreso_service.resumen(exp, detalle=True))
+
+
+class ProcesosView(APIView):
+    """Entrenamientos activos con su estado de salud (vivo / colgado)."""
+    permission_classes = [VerModelosAsr]
+
+    @extend_schema(
+        tags=['Entrenamiento — Experimentos'],
+        summary='Procesos de entrenamiento activos',
+        responses={200: OpenApiResponse(description='Lista de procesos activos')},
+    )
+    def get(self, request):
+        qs = ExperimentoEntrenamiento.objects.select_related('lengua', 'modelo_base').filter(
+            estado__in=[ExperimentoEntrenamiento.ESTADO_ENTRENANDO, ExperimentoEntrenamiento.ESTADO_PENDIENTE],
+        ).order_by('-created_at')
+        procesos = [progreso_service.resumen(e) for e in qs]
+        return Response({
+            'total': len(procesos),
+            'umbral_segundos': progreso_service.UMBRAL_COLGADO_SEGUNDOS,
+            'procesos': procesos,
         })
 
 

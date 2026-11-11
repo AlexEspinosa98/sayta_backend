@@ -37,11 +37,14 @@ import logging
 import os
 import gc
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union  # noqa: F401
+
+from . import progreso_service
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +288,7 @@ def _run_training(exp, samples: List[Dict], config: Dict, task_id: str,
     import torch
     from django.conf import settings
 
+    progreso_service.marcar_fase(str(exp.id), 'preparando')
     _prepare_memory_for_training(config)
 
     tipo = exp.modelo_base.tipo
@@ -509,12 +513,14 @@ def _run_single_split(exp, samples, config, tipo, modelo_hf, ruta_local,
             train_dataset=train_ds,
             eval_dataset=eval_ds,
             data_collator=data_collator,
-            callbacks=[_MLflowEpochCallback(), _CancellationCallback(stop_event)],
+            callbacks=[_MLflowEpochCallback(), _CancellationCallback(stop_event), progreso_service.crear_callback(str(exp.id))],
             **extra_kwargs,
         )
 
         logger.info('Entrenamiento simple: %d train / %d eval', len(train_ds), len(eval_ds))
+        t_ini = time.time()
         train_result = trainer.train()
+        segundos_entrenando = time.time() - t_ini
         trainer.save_model(output_dir)
         if hasattr(processor, 'save_pretrained'):
             processor.save_pretrained(output_dir)
@@ -526,9 +532,11 @@ def _run_single_split(exp, samples, config, tipo, modelo_hf, ruta_local,
             'eval_loss': round(eval_results.get('eval_loss', 0.0), 4),
             'eval_wer': round(eval_results.get('eval_wer', 1.0), 4),
             'eval_cer': round(eval_results.get('eval_cer', 1.0), 4),
+            'eval_per': round(eval_results.get('eval_per', 1.0), 4),
             'total_steps': train_result.global_step,
             'epochs': training_args.num_train_epochs,
-            'runtime_segundos': round(eval_results.get('eval_runtime', 0.0), 1),
+            'runtime_segundos': round(segundos_entrenando, 1),
+            'eval_runtime_segundos': round(eval_results.get('eval_runtime', 0.0), 1),
             'estrategia': 'split_simple',
         }, output_dir
     finally:
@@ -617,7 +625,8 @@ def _run_cross_validation(exp, samples, config, tipo, modelo_hf, ruta_local,
             train_dataset=train_ds,
             eval_dataset=eval_ds,
             data_collator=data_collator,
-            callbacks=[_MLflowEpochCallback(fold=fold_idx), _CancellationCallback(stop_event)],
+            callbacks=[_MLflowEpochCallback(fold=fold_idx), _CancellationCallback(stop_event),
+                       progreso_service.crear_callback(str(exp.id), fold=fold_idx, folds_total=k)],
             **extra_kwargs,
         )
 
@@ -629,6 +638,7 @@ def _run_cross_validation(exp, samples, config, tipo, modelo_hf, ruta_local,
         eval_results = trainer.evaluate()
         fold_wer = eval_results.get('eval_wer', 1.0)
         fold_cer = eval_results.get('eval_cer', 1.0)
+        fold_per = eval_results.get('eval_per', 1.0)
 
         fold_m = {
             'fold': fold_idx,
@@ -636,6 +646,7 @@ def _run_cross_validation(exp, samples, config, tipo, modelo_hf, ruta_local,
             'eval_loss': round(eval_results.get('eval_loss', 0.0), 4),
             'eval_wer': round(fold_wer, 4),
             'eval_cer': round(fold_cer, 4),
+            'eval_per': round(fold_per, 4),
             'steps': train_result.global_step,
         }
         fold_metrics.append(fold_m)
@@ -643,6 +654,7 @@ def _run_cross_validation(exp, samples, config, tipo, modelo_hf, ruta_local,
         mlflow.log_metrics({
             f'fold_{fold_idx}_wer': fold_wer,
             f'fold_{fold_idx}_cer': fold_cer,
+            f'fold_{fold_idx}_per': fold_per,
             f'fold_{fold_idx}_train_loss': train_result.training_loss,
         }, step=fold_idx)
 
@@ -664,6 +676,7 @@ def _run_cross_validation(exp, samples, config, tipo, modelo_hf, ruta_local,
     mean_wer = float(np.mean(wers))
     std_wer = float(np.std(wers))
     mean_cer = float(np.mean(cers))
+    mean_per = float(np.mean([m['eval_per'] for m in fold_metrics]))
     std_cer = float(np.std(cers))
 
     mlflow.log_metrics({
@@ -711,6 +724,7 @@ def _run_cross_validation(exp, samples, config, tipo, modelo_hf, ruta_local,
         'eval_wer_std': round(std_wer, 4),
         'eval_cer': round(mean_cer, 4),
         'eval_cer_std': round(std_cer, 4),
+        'eval_per': round(mean_per, 4),
         'best_fold_wer': round(best_wer, 4),
         'total_steps': sum(m['steps'] for m in fold_metrics),
         'epochs': config.get('num_train_epochs', 20),
@@ -1172,7 +1186,12 @@ def _build_compute_metrics(processor, tipo: str):
 
         wer = wer_metric.compute(predictions=pred_str, references=label_str)
         cer = cer_metric.compute(predictions=pred_str, references=label_str)
-        return {'wer': round(wer, 4), 'cer': round(cer, 4)}
+        try:
+            per = progreso_service.per_aproximado(pred_str, label_str)
+        except Exception as exc:   # PER es informativo: nunca debe romper la evaluación
+            logger.warning('No se pudo calcular PER: %s', exc)
+            per = 1.0
+        return {'wer': round(wer, 4), 'cer': round(cer, 4), 'per': round(per, 4)}
 
     return compute_metrics
 
