@@ -473,24 +473,59 @@ def _release_training_objects(*objects) -> None:
 # Estrategia 1 — Split simple 90/10
 # ==================================================================
 
+_EVAL_PORCENTAJE = 10  # % de AUDIOS ORIGINALES reservados para evaluación
+
+
+def _clave_audio(path: str) -> str:
+    """Clave estable de un audio (jornada/archivo): no cambia si se mueve la carpeta base."""
+    p = Path(path)
+    return f'{p.parent.name}/{p.name}'
+
+
+def dividir_train_eval(samples: List[Dict], porcentaje: int = _EVAL_PORCENTAJE) -> Tuple[List[Dict], List[Dict]]:
+    """
+    Split train/eval ESTABLE y SIN FUGA, decidido por audio original.
+
+    - Estable: un audio cae siempre en el mismo lado (hash de su clave), aunque el corpus crezca
+      o se entrene otra lengua. Así los experimentos comparten el mismo conjunto de evaluación y
+      sus métricas son comparables, y un reentrenamiento no evalúa con audios vistos antes.
+    - Sin fuga: se decide ANTES de cortar audios largos y de aumentar datos, de modo que los
+      fragmentos y las copias aumentadas de un audio nunca quedan repartidos entre train y eval.
+    """
+    import hashlib
+    train: List[Dict] = []
+    ev: List[Dict] = []
+    for s in samples:
+        h = int(hashlib.sha1(_clave_audio(s['audio']).encode('utf-8')).hexdigest()[:8], 16) % 100
+        (ev if h < porcentaje else train).append(s)
+    if not ev and len(train) > 1:        # corpus diminuto: garantizar al menos 1 de evaluación
+        ev.append(train.pop())
+    return train, ev
+
+
 def _run_single_split(exp, samples, config, tipo, modelo_hf, ruta_local,
                       output_dir, use_fp16, mlflow, stop_event: threading.Event):
-    # Expandir audios largos en clips cortos antes de cualquier procesamiento
     chunks_dir = Path(output_dir) / 'chunks'
     chunks_dir.mkdir(parents=True, exist_ok=True)
-    samples = _expand_samples(samples, chunks_dir)
 
-    # Data augmentation: genera muestras adicionales antes del split train/eval
+    # 1) Split por audio original (antes de chunking y augmentation → sin fuga entre train y eval)
+    train_orig, eval_orig = dividir_train_eval(samples)
+    # 2) Expandir audios largos en clips cortos
+    train_samples = _expand_samples(train_orig, chunks_dir)
+    eval_samples = _expand_samples(eval_orig, chunks_dir)
+    # 3) Data augmentation SOLO sobre entrenamiento (la evaluación queda con audio real, sin tocar)
     aug_config = config.get('augmentation') or {}
     if aug_config.get('habilitado', False):
         from entrenamiento.services import augmentation_service
         aug_dir = Path(output_dir) / 'augmented'
-        samples = augmentation_service.aplicar_augmentation(samples, aug_config, aug_dir)
+        train_samples = augmentation_service.aplicar_augmentation(train_samples, aug_config, aug_dir)
+    eval_paths = {s['audio'] for s in eval_samples}
+    samples = train_samples + eval_samples
 
     model = processor = train_ds = eval_ds = data_collator = trainer = None
     try:
         model, processor = _load_model_for_training(tipo, modelo_hf, ruta_local, samples, config)
-        train_ds, eval_ds = _build_hf_dataset(samples, processor, tipo)
+        train_ds, eval_ds = _build_hf_dataset(samples, processor, tipo, eval_paths=eval_paths)
 
         exp.num_muestras_train = len(train_ds)
         exp.num_muestras_eval = len(eval_ds)
@@ -513,7 +548,8 @@ def _run_single_split(exp, samples, config, tipo, modelo_hf, ruta_local,
             train_dataset=train_ds,
             eval_dataset=eval_ds,
             data_collator=data_collator,
-            callbacks=[_MLflowEpochCallback(), _CancellationCallback(stop_event), progreso_service.crear_callback(str(exp.id))],
+            callbacks=[_MLflowEpochCallback(), _CancellationCallback(stop_event), progreso_service.crear_callback(str(exp.id))]
+                      + _early_stopping(config),
             **extra_kwargs,
         )
 
@@ -538,6 +574,8 @@ def _run_single_split(exp, samples, config, tipo, modelo_hf, ruta_local,
             'runtime_segundos': round(segundos_entrenando, 1),
             'eval_runtime_segundos': round(eval_results.get('eval_runtime', 0.0), 1),
             'estrategia': 'split_simple',
+            'split': 'estable_por_audio',
+            'parada_temprana': bool(trainer.state.epoch and trainer.state.epoch < training_args.num_train_epochs - 0.5),
         }, output_dir
     finally:
         _release_training_objects(trainer, model, processor, data_collator, train_ds, eval_ds)
@@ -991,7 +1029,7 @@ def _expand_samples(samples: List[Dict], chunks_dir: Path) -> List[Dict]:
     return expanded
 
 
-def _build_hf_dataset(samples: List[Dict], processor, tipo: str):
+def _build_hf_dataset(samples: List[Dict], processor, tipo: str, eval_paths=None):
     """
     Construye HF Dataset preprocesado y hace split 90/10.
 
@@ -1052,7 +1090,15 @@ def _build_hf_dataset(samples: List[Dict], processor, tipo: str):
         'path': valid_paths,
         'sentence': valid_sentences,
     })
-    split = dataset.train_test_split(test_size=0.1, seed=42)
+    if eval_paths is not None:
+        # Split ya decidido por audio original (ver dividir_train_eval): sin fuga y estable
+        idx_eval = [i for i, pth in enumerate(valid_paths) if pth in eval_paths]
+        idx_train = [i for i, pth in enumerate(valid_paths) if pth not in eval_paths]
+        if not idx_eval or not idx_train:
+            raise RuntimeError('El split train/eval quedó vacío tras la validación de muestras.')
+        split = {'train': dataset.select(idx_train), 'test': dataset.select(idx_eval)}
+    else:
+        split = dataset.train_test_split(test_size=0.1, seed=42)
 
     if tipo == 'whisper':
         def preprocess_whisper(batch):
@@ -1299,6 +1345,15 @@ def _apply_peft(model, tipo: str, config: Dict):
 # ==================================================================
 # Callback de cancelación — para detener el Trainer limpiamente
 # ==================================================================
+
+def _early_stopping(config: Dict) -> list:
+    """Para el entrenamiento si el WER de evaluación no mejora en N épocas (config.early_stopping_patience, 0 = apagado)."""
+    patience = int(config.get('early_stopping_patience', 3) or 0)
+    if patience <= 0:
+        return []
+    from transformers import EarlyStoppingCallback
+    return [EarlyStoppingCallback(early_stopping_patience=patience)]
+
 
 def _CancellationCallback(stop_event: threading.Event):
     """
