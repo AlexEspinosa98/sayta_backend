@@ -122,3 +122,38 @@ class ExperimentoEntrenamiento(models.Model):
 
     def __str__(self):
         return f"{self.nombre} [{self.lengua.codigo}] — {self.estado}"
+
+
+class TrabajoEntrenamiento(models.Model):
+    """
+    Cola de entrenamientos para el worker (`manage.py entrenar_worker`, contenedor sayta-trainer).
+    La web solo encola; el worker ejecuta. Así un despliegue del backend no mata el entrenamiento.
+    """
+    EN_COLA = 'en_cola'
+    EJECUTANDO = 'ejecutando'
+    CANCELAR = 'cancelar'        # solicitud de cancelación pendiente de que el worker la atienda
+    TERMINADO = 'terminado'
+    CANCELADO = 'cancelado'
+    FALLIDO = 'fallido'
+    ESTADOS = [(EN_COLA, 'En cola'), (EJECUTANDO, 'Ejecutando'), (CANCELAR, 'Cancelando'),
+               (TERMINADO, 'Terminado'), (CANCELADO, 'Cancelado'), (FALLIDO, 'Fallido')]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    experimento = models.ForeignKey(ExperimentoEntrenamiento, on_delete=models.CASCADE, related_name='trabajos')
+    samples = models.JSONField(default=list)
+    config = models.JSONField(default=dict)
+    estado = models.CharField(max_length=20, choices=ESTADOS, default=EN_COLA, db_index=True)
+    worker = models.CharField(max_length=100, blank=True)
+    mensaje = models.TextField(blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    iniciado_en = models.DateTimeField(null=True, blank=True)
+    terminado_en = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'entrenamiento_trabajos'
+        ordering = ['creado_en']
+        verbose_name = 'Trabajo de entrenamiento'
+        verbose_name_plural = 'Trabajos de entrenamiento'
+
+    def __str__(self):
+        return f'{self.experimento_id} [{self.estado}]'

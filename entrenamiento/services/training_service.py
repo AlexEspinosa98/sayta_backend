@@ -63,8 +63,32 @@ _tasks_lock = threading.Lock()
 # Punto de entrada público
 # ==================================================================
 
+def modo_worker() -> bool:
+    """True cuando la web solo ENCOLA y el contenedor sayta-trainer (manage.py entrenar_worker) ejecuta."""
+    return os.environ.get('SAYTA_TRAINING_WORKER_MODE', '0').lower() in ('1', 'true', 'si', 'sí')
+
+
+def _trabajo(task_id: str):
+    from entrenamiento.models import TrabajoEntrenamiento
+    try:
+        return TrabajoEntrenamiento.objects.get(pk=task_id)
+    except (TrabajoEntrenamiento.DoesNotExist, ValueError, Exception):
+        return None
+
+
+_ESTADO_TRABAJO_LEGIBLE = {
+    'en_cola': 'en cola (esperando al worker de entrenamiento)', 'ejecutando': 'entrenando', 'cancelar': 'cancelando',
+    'terminado': 'terminado', 'cancelado': 'cancelado', 'fallido': 'fallido',
+}
+
+
 def launch_training(experimento_id: str, samples: List[Dict], config: Dict) -> str:
-    """Lanza el entrenamiento en un hilo daemon. Retorna task_id."""
+    """Lanza el entrenamiento. En modo worker lo encola en BD; si no, lo corre en un hilo daemon. Retorna task_id."""
+    if modo_worker():
+        from entrenamiento.models import TrabajoEntrenamiento
+        job = TrabajoEntrenamiento.objects.create(experimento_id=experimento_id, samples=samples, config=config)
+        logger.info('Entrenamiento %s encolado para el worker (trabajo %s)', experimento_id, job.id)
+        return str(job.id)
     _force_single_process_training_env()
     task_id = str(uuid.uuid4())
     stop_event = threading.Event()
@@ -87,11 +111,42 @@ def launch_training(experimento_id: str, samples: List[Dict], config: Dict) -> s
 
 def get_task_info(task_id: str) -> Optional[Dict]:
     with _tasks_lock:
-        return _active_tasks.get(task_id)
+        info = _active_tasks.get(task_id)
+    if info is not None or not modo_worker():
+        return info
+    job = _trabajo(task_id)
+    if job is None:
+        return None
+    return {
+        'experimento_id': str(job.experimento_id),
+        'started_at': (job.iniciado_en or job.creado_en).isoformat(),
+        'estado': _ESTADO_TRABAJO_LEGIBLE.get(job.estado, job.estado),
+        'worker': job.worker,
+        'en_cola': job.estado == 'en_cola',
+    }
 
 
 def request_cancellation(task_id: str) -> bool:
     """Señala al hilo de entrenamiento que debe detenerse. Retorna True si existía."""
+    if modo_worker():
+        job = _trabajo(task_id)
+        if job is None:
+            return False
+        from django.utils import timezone
+        from entrenamiento.models import TrabajoEntrenamiento, ExperimentoEntrenamiento
+        if job.estado == TrabajoEntrenamiento.EN_COLA:
+            job.estado = TrabajoEntrenamiento.CANCELADO
+            job.terminado_en = timezone.now()
+            job.mensaje = 'Cancelado antes de iniciar'
+            job.save(update_fields=['estado', 'terminado_en', 'mensaje'])
+            ExperimentoEntrenamiento.objects.filter(pk=job.experimento_id).update(
+                estado=ExperimentoEntrenamiento.ESTADO_FALLIDO, error_mensaje='Cancelado manualmente antes de iniciar', completed_at=timezone.now())
+            return True
+        if job.estado in (TrabajoEntrenamiento.EJECUTANDO, TrabajoEntrenamiento.CANCELAR):
+            job.estado = TrabajoEntrenamiento.CANCELAR
+            job.save(update_fields=['estado'])
+            return True
+        return False
     with _tasks_lock:
         event = _stop_events.get(task_id)
         if event:
