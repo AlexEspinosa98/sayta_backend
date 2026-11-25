@@ -22,9 +22,12 @@ class ResultadoTraduccionSerializer(serializers.Serializer):
     termino_es = serializers.CharField(allow_blank=True, help_text='Equivalente en español.')
     definicion = serializers.CharField(allow_blank=True, help_text='Definición en español.')
     score = serializers.FloatField(allow_null=True, help_text='Similitud coseno (0–1).')
-    probabilidad = serializers.FloatField(
-        help_text='Probabilidad relativa entre los resultados retornados (suma 100 %).'
-    )
+    probabilidad = serializers.FloatField(help_text='Igual a confianza (compatibilidad).')
+    confianza = serializers.IntegerField(help_text='Confianza absoluta 0–100: 100 = coincidencia exacta con el glosario.')
+    nivel = serializers.CharField(help_text="exacta | aproximada | parcial | alta | media | baja")
+    fuente = serializers.CharField(help_text="glosario | patrón | semántica")
+    nota = serializers.CharField(allow_blank=True, required=False)
+    hipotesis = serializers.BooleanField(required=False, help_text='True si la entrada es una hipótesis aún no validada con hablantes.')
     mejor_coincidencia = serializers.BooleanField(
         help_text='True en el resultado con mayor probabilidad (el que más sentido tiene).'
     )
@@ -51,7 +54,10 @@ class ConclusionSerializer(serializers.Serializer):
     termino = serializers.CharField(help_text='Término en la lengua indígena con mayor probabilidad.')
     termino_es = serializers.CharField(help_text='Equivalente en español.')
     definicion = serializers.CharField(help_text='Definición en español.')
-    probabilidad = serializers.FloatField(help_text='Probabilidad relativa sobre los resultados retornados.')
+    probabilidad = serializers.FloatField(help_text='Igual a confianza (compatibilidad).')
+    confianza = serializers.IntegerField(required=False)
+    nivel = serializers.CharField(required=False)
+    fuente = serializers.CharField(required=False)
 
 
 class TraducirResponseSerializer(serializers.Serializer):
@@ -62,6 +68,9 @@ class TraducirResponseSerializer(serializers.Serializer):
         help_text='Dirección de la traducción, p. ej. "es→iku" o "iku→es".'
     )
     conclusion = ConclusionSerializer(
+        allow_null=True,
         help_text='Resultado con mayor probabilidad. Es la traducción más probable.'
     )
     resultados = ResultadoTraduccionSerializer(many=True)
+    en_glosario = serializers.BooleanField(required=False, help_text='False cuando el texto no parece estar en el glosario.')
+    aviso = serializers.CharField(allow_null=True, allow_blank=True, required=False)

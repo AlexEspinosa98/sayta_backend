@@ -1223,7 +1223,8 @@ class TranscribirTraducirView(APIView):
             else:
                 engine = MultiLanguageSearchEngine.get_instance()
                 pipeline = TranslationPipeline(engine, language_code=exp.lengua.codigo)
-                resultados = pipeline.translate(transcripcion, top_k=top_k)
+                salida_trad = pipeline.traducir(transcripcion, direccion='lengua_a_es', top_k=top_k)
+                resultados = salida_trad['resultados']
                 mejor = resultados[0] if resultados else None
                 traduccion_data = {
                     'direccion': f'{exp.lengua.codigo}→es' if direccion == 'lengua_a_es' else f'es→{exp.lengua.codigo}',
@@ -1233,8 +1234,13 @@ class TranscribirTraducirView(APIView):
                         'termino_es': mejor['termino_es'],
                         'definicion': mejor['definicion'],
                         'probabilidad': mejor['probabilidad'],
+                        'confianza': mejor['confianza'],
+                        'nivel': mejor['nivel'],
+                        'fuente': mejor['fuente'],
                     } if mejor else None,
                     'resultados': resultados,
+                    'en_glosario': salida_trad['en_glosario'],
+                    'aviso': salida_trad['aviso'],
                 }
         except Exception as exc:
             logger.error('Error en traducción post-transcripción: %s', exc, exc_info=True)

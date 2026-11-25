@@ -219,7 +219,16 @@ class EmbeddingService:
         corpus = []
         metadata = []
         for t in terminos:
+            # El texto vectorizado incluye el término, su equivalente en español, los sinónimos y la
+            # definición: así las consultas en español encuentran la entrada aunque la definición no
+            # repita la glosa, y las consultas en lengua se apoyan en el término y sus variantes.
+            es = t.get('termino_es__termino') or ''
+            sin = ' '.join(s for s in (t.get('sinonimos') or []) if isinstance(s, str))
             texto = f"passage: {t['termino']}"
+            if es:
+                texto += f" — {es}."
+            if sin:
+                texto += f" ({sin})"
             if t['definicion']:
                 texto += f" {t['definicion']}"
             corpus.append(texto)

@@ -11,6 +11,7 @@ Función legacy:  semantic_search(query, top_k)  → sigue funcionando igual
 import json
 import logging
 import threading
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -19,6 +20,24 @@ import numpy as np
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Modelo compartido: el mismo SentenceTransformer sirve a todas las lenguas
+# ---------------------------------------------------------------------------
+
+_modelos: Dict[str, object] = {}
+_modelos_lock = threading.Lock()
+
+
+def _modelo_compartido(model_name: str):
+    with _modelos_lock:
+        m = _modelos.get(model_name)
+        if m is None:
+            from sentence_transformers import SentenceTransformer
+            m = _modelos[model_name] = SentenceTransformer(model_name)
+            logger.info('Modelo de embeddings cargado (compartido): %s', model_name)
+        return m
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +85,7 @@ class SingleLanguageEngine:
         with open(self._metadata_path, 'r', encoding='utf-8') as f:
             self._metadata = json.load(f)
 
-        self._model = SentenceTransformer(self._model_name)
+        self._model = _modelo_compartido(self._model_name)
         self._loaded = True
         logger.info('Motor cargado: model=%s faiss=%s', self._model_name, self._faiss_path)
 
@@ -91,6 +110,7 @@ class SingleLanguageEngine:
                 'definicion': entry.get('definicion'),
                 'pos': entry.get('pos'),
                 'sinonimos': entry.get('sinonimos', []),
+                'tipo_morfema': entry.get('tipo_morfema'),
                 'score': score,
             })
         return results
@@ -136,20 +156,40 @@ class MultiLanguageSearchEngine:
             self._load_from_db()
             self._initialized = True
 
+    _TTL_SINCRONIZACION = 60  # segundos entre comprobaciones de la versión activa en BD
+
     def _load_from_db(self):
         """Carga todos los embeddings activos registrados en la BD."""
         try:
             from terminos.models import EmbeddingVersion
             active = EmbeddingVersion.objects.filter(status=EmbeddingVersion.STATUS_ACTIVE).select_related('lengua')
+            self._versiones = {}
             for ev in active:
                 self._engines[ev.lengua.codigo] = SingleLanguageEngine(
                     faiss_path=ev.faiss_path,
                     metadata_path=ev.metadata_path,
                     model_name=ev.model_name,
                 )
+                self._versiones[ev.lengua.codigo] = str(ev.id)
+            self._sincronizado = time.time()
             logger.info('MultiLanguageSearchEngine: %d lenguas cargadas desde BD', len(self._engines))
         except Exception as exc:
             logger.warning('No se pudieron cargar embeddings desde BD: %s', exc)
+
+    def _sincronizar(self):
+        """Con varios workers (gunicorn) la activación de un embedding ocurre en otro proceso:
+        cada TTL se comprueba en BD si cambió la versión activa de alguna lengua y se recarga."""
+        if time.time() - getattr(self, '_sincronizado', 0) < self._TTL_SINCRONIZACION:
+            return
+        self._sincronizado = time.time()
+        try:
+            from terminos.models import EmbeddingVersion
+            for ev in EmbeddingVersion.objects.filter(status=EmbeddingVersion.STATUS_ACTIVE).select_related('lengua'):
+                if getattr(self, '_versiones', {}).get(ev.lengua.codigo) != str(ev.id):
+                    self.reload_language(ev.lengua.codigo, ev.faiss_path, ev.metadata_path, ev.model_name)
+                    self._versiones = {**getattr(self, '_versiones', {}), ev.lengua.codigo: str(ev.id)}
+        except Exception as exc:
+            logger.warning('No se pudo sincronizar embeddings activos: %s', exc)
 
     def reload_language(self, codigo: str, faiss_path: str, metadata_path: str, model_name: str):
         """
@@ -166,6 +206,7 @@ class MultiLanguageSearchEngine:
         logger.info('Motor recargado para lengua: %s', codigo)
 
     def search(self, query_text: str, language_code: str, top_k: int = 5) -> List[Dict]:
+        self._sincronizar()
         engine = self._get_engine(language_code)
         if engine is None:
             raise ValueError(

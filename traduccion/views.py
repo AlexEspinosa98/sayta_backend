@@ -157,7 +157,8 @@ class TraducirView(APIView):
             from translator_api.search_engine import MultiLanguageSearchEngine
             engine = MultiLanguageSearchEngine.get_instance()
             pipeline = TranslationPipeline(engine, language_code=lengua.codigo)
-            resultados = pipeline.translate(texto, top_k=3)
+            salida = pipeline.traducir(texto, direccion=direccion_input, top_k=3)
+            resultados = salida['resultados']
         except ValueError as exc:
             return Response({'error': str(exc)}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
         except Exception as exc:
@@ -173,6 +174,9 @@ class TraducirView(APIView):
             'termino_es': mejor['termino_es'],
             'definicion': mejor['definicion'],
             'probabilidad': mejor['probabilidad'],
+            'confianza': mejor['confianza'],
+            'nivel': mejor['nivel'],
+            'fuente': mejor['fuente'],
         } if mejor else None
 
         data = {
@@ -191,6 +195,8 @@ class TraducirView(APIView):
             'direccion': _formatear_direccion(direccion_input, lengua.codigo),
             'conclusion': conclusion,
             'resultados': resultados,
+            'en_glosario': salida['en_glosario'],
+            'aviso': salida['aviso'],
         }
         return Response(TraducirResponseSerializer(data).data)
 
