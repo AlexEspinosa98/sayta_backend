@@ -1246,6 +1246,11 @@ class TranscribirTraducirView(APIView):
                     'aviso': salida_trad['aviso'],
                     'verificacion': verificacion_trad,
                 }
+                try:
+                    from traduccion.views_aprendizaje import registrar_consulta
+                    traduccion_data['consulta_id'] = registrar_consulta(request, exp.lengua, 'lengua_a_es', transcripcion, salida_trad, verificacion_trad, None, origen='audio')
+                except Exception:
+                    pass
         except Exception as exc:
             logger.error('Error en traducción post-transcripción: %s', exc, exc_info=True)
             traduccion_data = {'error': f'Transcripción exitosa pero traducción falló: {exc}'}

@@ -13,6 +13,7 @@ Flujo:
 """
 
 import logging
+import time
 
 from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
 from rest_framework import status
@@ -126,6 +127,7 @@ class TraducirView(APIView):
         lengua_id = serializer.validated_data['lengua_id']
         direccion_input = serializer.validated_data['direccion']
         verificar = serializer.validated_data.get('verificar', True)
+        t_inicio = time.time()
 
         # --- Resolver lengua y embedding activo ---
         try:
@@ -206,6 +208,8 @@ class TraducirView(APIView):
             'aviso': salida['aviso'],
             'verificacion': verificacion,
         }
+        from .views_aprendizaje import registrar_consulta
+        data['consulta_id'] = registrar_consulta(request, lengua, direccion_input, texto, salida, verificacion, int((time.time() - t_inicio) * 1000))
         return Response(TraducirResponseSerializer(data).data)
 
     @extend_schema(

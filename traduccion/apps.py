@@ -7,7 +7,7 @@ from django.apps import AppConfig
 
 logger = logging.getLogger(__name__)
 
-_COMANDOS_SIN_PRECARGA = {'migrate', 'makemigrations', 'shell', 'collectstatic', 'dumpdata', 'loaddata', 'test', 'check', 'evaluar_traductor', 'createsuperuser'}
+_COMANDOS_SIN_PRECARGA = {'migrate', 'makemigrations', 'shell', 'collectstatic', 'dumpdata', 'loaddata', 'test', 'check', 'evaluar_traductor', 'createsuperuser', 'entrenar_worker'}
 
 
 class TraduccionConfig(AppConfig):

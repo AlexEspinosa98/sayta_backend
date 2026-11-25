@@ -76,4 +76,5 @@ class TraducirResponseSerializer(serializers.Serializer):
     resultados = ResultadoTraduccionSerializer(many=True)
     en_glosario = serializers.BooleanField(required=False, help_text='False cuando el texto no parece estar en el glosario.')
     aviso = serializers.CharField(allow_null=True, allow_blank=True, required=False)
+    consulta_id = serializers.CharField(allow_null=True, required=False, help_text='Id del registro de la consulta (para enviar la opción elegida o una corrección).')
     verificacion = serializers.DictField(allow_null=True, required=False, help_text='Resultado del agente verificador: estado (confirmada | ajustada | compuesta | sin_coincidencia | rechazada | no_concluyente | no_disponible | omitida), eleccion, traduccion_final, explicacion, confianza, sin_traducir, modelo, ms, piezas.')
