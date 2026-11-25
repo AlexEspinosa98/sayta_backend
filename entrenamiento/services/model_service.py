@@ -230,6 +230,36 @@ def _release_cached_model(cached: Optional[Tuple]) -> None:
         logger.debug('No se pudo limpiar caché CUDA', exc_info=True)
 
 
+def transcribe_audio_nbest(audio_path: str, model, processor, tipo: str, language: str = 'es', n: int = 3) -> list:
+    """
+    Devuelve hasta n transcripciones candidatas (la primera es la más probable). Para Whisper usa
+    búsqueda por haces (beam search) con varias secuencias; para wav2vec2 solo hay una.
+    """
+    import torch
+
+    try:
+        import librosa
+        speech, _ = librosa.load(audio_path, sr=16000, mono=True)
+    except Exception as exc:
+        raise RuntimeError(f'No se pudo cargar el audio {audio_path}: {exc}') from exc
+
+    if tipo != 'whisper' or n <= 1:
+        return [transcribe_audio(audio_path, model, processor, tipo, language)]
+    input_features = processor(speech, sampling_rate=16000, return_tensors='pt').input_features
+    try:
+        input_features = input_features.to(next(model.parameters()).device)
+    except Exception:
+        pass
+    with torch.no_grad():
+        ids = model.generate(input_features, language=language, task='transcribe', num_beams=max(4, n), num_return_sequences=n)
+    textos = [t.strip() for t in processor.batch_decode(ids, skip_special_tokens=True)]
+    unicos = []
+    for t in textos:
+        if t and t not in unicos:
+            unicos.append(t)
+    return unicos or ['']
+
+
 def transcribe_audio(audio_path: str, model, processor, tipo: str, language: str = 'es') -> str:
     """
     Transcribe un archivo de audio usando el modelo y procesador dados.

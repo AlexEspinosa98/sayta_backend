@@ -17,6 +17,11 @@ class TraduccionConfig(AppConfig):
 
     def ready(self):
         _conectar_invalidacion()
+        try:
+            from . import historial
+            historial.conectar()
+        except Exception as exc:
+            logger.warning('No se pudo conectar el historial del glosario: %s', exc)
         if any(c in sys.argv for c in _COMANDOS_SIN_PRECARGA) or os.environ.get('SAYTA_SIN_PRECARGA') == '1':
             return
         threading.Thread(target=_precalentar, name='traduccion-precarga', daemon=True).start()

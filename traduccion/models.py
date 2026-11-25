@@ -79,3 +79,27 @@ class CorreccionTraduccion(models.Model):
 
     def __str__(self):
         return f'{self.tipo} [{self.veredicto}] {self.texto_origen[:40]}'
+
+
+class HistorialTermino(models.Model):
+    """Quién creó, editó, restauró o borró cada término del glosario, con el antes y el después."""
+    ACCIONES = [('crear', 'Creó'), ('editar', 'Editó'), ('eliminar', 'Eliminó'), ('restaurar', 'Restauró'), ('desactivar', 'Desactivó')]
+    termino = models.ForeignKey('terminos.TerminoLeng', null=True, blank=True, on_delete=models.SET_NULL, related_name='historial')
+    termino_id_original = models.IntegerField(null=True, blank=True, db_index=True)
+    termino_texto = models.CharField(max_length=255, blank=True)
+    lengua_codigo = models.CharField(max_length=20, blank=True, db_index=True)
+    accion = models.CharField(max_length=12, choices=ACCIONES, db_index=True)
+    cambios = models.JSONField(default=dict)      # {campo: {"antes": ..., "despues": ...}}
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='cambios_glosario')
+    usuario_nombre = models.CharField(max_length=150, blank=True)
+    origen = models.CharField(max_length=30, blank=True)   # api | carga_masiva | correccion | shell
+    creado_en = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'traduccion_historial_terminos'
+        ordering = ['-creado_en', '-id']
+        verbose_name = 'Historial de término'
+        verbose_name_plural = 'Historial de términos'
+
+    def __str__(self):
+        return f'{self.accion} {self.termino_texto} ({self.usuario_nombre or "sistema"})'

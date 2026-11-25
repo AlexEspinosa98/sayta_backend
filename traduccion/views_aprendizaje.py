@@ -15,7 +15,7 @@ from rest_framework.views import APIView
 
 from roles.permissions import requiere_permiso
 from . import lexico
-from .models import ConsultaTraduccion, CorreccionTraduccion
+from .models import ConsultaTraduccion, CorreccionTraduccion, HistorialTermino
 
 logger = logging.getLogger(__name__)
 
@@ -232,3 +232,26 @@ class EstadisticasTraduccionView(APIView):
             'correcciones': {k: CorreccionTraduccion.objects.filter(veredicto=k).count() for k in ('pendiente', 'aprobada', 'rechazada')},
             'hipotesis_sin_validar': __import__('terminos.models', fromlist=['TerminoLeng']).TerminoLeng.objects.filter(tipo_morfema='hipótesis', activo=True).count(),
         })
+
+
+class HistorialGlosarioView(APIView):
+    permission_classes = [VerGlosario]
+
+    @extend_schema(tags=['Traducción'], summary='Historial de cambios del glosario (filtros: termino_id, lengua, accion, usuario, limite)')
+    def get(self, request):
+        qs = HistorialTermino.objects.select_related('usuario')
+        q = request.query_params
+        if q.get('termino_id'):
+            qs = qs.filter(Q(termino_id=q['termino_id']) | Q(termino_id_original=q['termino_id']))
+        if q.get('lengua'):
+            qs = qs.filter(lengua_codigo=q['lengua'])
+        if q.get('accion'):
+            qs = qs.filter(accion=q['accion'])
+        if q.get('usuario'):
+            qs = qs.filter(usuario_nombre__icontains=q['usuario'])
+        limite = min(int(q.get('limite', 100)), 1000)
+        total = qs.count()
+        return Response({'total': total, 'resultados': [{
+            'id': h.id, 'termino_id': h.termino_id or h.termino_id_original, 'termino': h.termino_texto, 'lengua': h.lengua_codigo,
+            'accion': h.accion, 'cambios': h.cambios, 'usuario': h.usuario_nombre or 'sistema', 'origen': h.origen, 'creado_en': h.creado_en.isoformat(),
+        } for h in qs[:limite]]})
