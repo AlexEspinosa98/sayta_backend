@@ -336,3 +336,46 @@ def buscar_patrones(texto: str, codigo: str, direccion: str) -> List[Dict]:
                                'fuente': 'patrón', 'coincidencia': e['termino_es'], 'nota': 'Forma construida a partir de un patrón; verificar con hablante.', 'hipotesis': False})
                 break
     return salida
+
+
+# ---------------------------------------------------------------------------
+# Piezas del glosario dentro de un texto (para que el verificador pueda componer)
+# ---------------------------------------------------------------------------
+
+def piezas_en_texto(texto: str, codigo: str, direccion: str, max_n: int = 4) -> List[Dict]:
+    """
+    Recorre los n-gramas (1–4 palabras) del texto y devuelve los que coinciden EXACTAMENTE con una
+    entrada del glosario: [{'fragmento', 'equivalente', 'termino_lengua', 'termino_es', 'inicio', 'fin'}].
+    Prefiere los fragmentos más largos y no solapados.
+    """
+    idx = indice(codigo)
+    toks_orig = [t for t in re.split(r'\s+', texto.strip()) if t]
+    toks = [normalizar(t) for t in toks_orig]
+    por_clave: Dict[str, Dict] = {}
+    for e in idx.entradas:
+        claves = e['nes'] if direccion == 'es_a_lengua' else [e['nt']] + e['nsin']
+        for k in claves:
+            if k and k not in por_clave:
+                por_clave[k] = e
+    n = len(toks)
+    hallados = []
+    for size in range(min(max_n, n), 0, -1):
+        for i in range(n - size + 1):
+            k = ' '.join(t for t in toks[i:i + size] if t)
+            if not k or (size == 1 and len(k) < 3):
+                continue
+            e = por_clave.get(k)
+            if e is None:
+                continue
+            hallados.append((i, i + size, e))
+    # sin solapes, los más largos primero
+    ocupado = [False] * n
+    piezas = []
+    for i, j, e in sorted(hallados, key=lambda x: (-(x[1] - x[0]), x[0])):
+        if any(ocupado[i:j]):
+            continue
+        for p in range(i, j):
+            ocupado[p] = True
+        piezas.append({'fragmento': ' '.join(toks_orig[i:j]), 'equivalente': e['termino'] if direccion == 'es_a_lengua' else e['termino_es'],
+                       'termino_lengua': e['termino'], 'termino_es': e['termino_es'], 'inicio': i, 'fin': j})
+    return sorted(piezas, key=lambda p: p['inicio'])

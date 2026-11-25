@@ -8,6 +8,7 @@ class TraducirRequestSerializer(serializers.Serializer):
     lengua_id = serializers.IntegerField(
         help_text='ID de la lengua indígena.'
     )
+    verificar = serializers.BooleanField(required=False, default=True, help_text='Pasar el resultado por el agente verificador (modelo de lenguaje local).')
     direccion = serializers.ChoiceField(
         choices=['es_a_lengua', 'lengua_a_es'],
         help_text=(
@@ -28,6 +29,7 @@ class ResultadoTraduccionSerializer(serializers.Serializer):
     fuente = serializers.CharField(help_text="glosario | patrón | semántica")
     nota = serializers.CharField(allow_blank=True, required=False)
     hipotesis = serializers.BooleanField(required=False, help_text='True si la entrada es una hipótesis aún no validada con hablantes.')
+    verificado = serializers.BooleanField(required=False)
     mejor_coincidencia = serializers.BooleanField(
         help_text='True en el resultado con mayor probabilidad (el que más sentido tiene).'
     )
@@ -74,3 +76,4 @@ class TraducirResponseSerializer(serializers.Serializer):
     resultados = ResultadoTraduccionSerializer(many=True)
     en_glosario = serializers.BooleanField(required=False, help_text='False cuando el texto no parece estar en el glosario.')
     aviso = serializers.CharField(allow_null=True, allow_blank=True, required=False)
+    verificacion = serializers.DictField(allow_null=True, required=False, help_text='Resultado del agente verificador: estado (confirmada | ajustada | compuesta | sin_coincidencia | rechazada | no_concluyente | no_disponible | omitida), eleccion, traduccion_final, explicacion, confianza, sin_traducir, modelo, ms, piezas.')

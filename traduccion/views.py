@@ -20,6 +20,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from roles.permissions import requiere_permiso
+from . import agentes
 from .pipeline import TranslationPipeline
 from .serializers import TraducirRequestSerializer, TraducirResponseSerializer
 
@@ -124,6 +125,7 @@ class TraducirView(APIView):
         texto = serializer.validated_data['texto'].strip()
         lengua_id = serializer.validated_data['lengua_id']
         direccion_input = serializer.validated_data['direccion']
+        verificar = serializer.validated_data.get('verificar', True)
 
         # --- Resolver lengua y embedding activo ---
         try:
@@ -157,8 +159,13 @@ class TraducirView(APIView):
             from translator_api.search_engine import MultiLanguageSearchEngine
             engine = MultiLanguageSearchEngine.get_instance()
             pipeline = TranslationPipeline(engine, language_code=lengua.codigo)
-            salida = pipeline.traducir(texto, direccion=direccion_input, top_k=3)
+            salida = pipeline.traducir(texto, direccion=direccion_input, top_k=5)
             resultados = salida['resultados']
+            verificacion = None
+            if verificar:
+                v = agentes.verificar(texto, direccion_input, lengua.codigo, lengua.nombre, resultados)
+                resultados, verificacion = v['resultados'], v['verificacion']
+            resultados = resultados[:4]
         except ValueError as exc:
             return Response({'error': str(exc)}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
         except Exception as exc:
@@ -195,8 +202,9 @@ class TraducirView(APIView):
             'direccion': _formatear_direccion(direccion_input, lengua.codigo),
             'conclusion': conclusion,
             'resultados': resultados,
-            'en_glosario': salida['en_glosario'],
+            'en_glosario': salida['en_glosario'] or bool(verificacion and verificacion.get('estado') in ('confirmada', 'ajustada', 'compuesta')),
             'aviso': salida['aviso'],
+            'verificacion': verificacion,
         }
         return Response(TraducirResponseSerializer(data).data)
 

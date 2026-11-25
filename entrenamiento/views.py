@@ -1223,8 +1223,11 @@ class TranscribirTraducirView(APIView):
             else:
                 engine = MultiLanguageSearchEngine.get_instance()
                 pipeline = TranslationPipeline(engine, language_code=exp.lengua.codigo)
-                salida_trad = pipeline.traducir(transcripcion, direccion='lengua_a_es', top_k=top_k)
+                salida_trad = pipeline.traducir(transcripcion, direccion='lengua_a_es', top_k=max(top_k, 5))
                 resultados = salida_trad['resultados']
+                from traduccion import agentes as _agentes
+                _v = _agentes.verificar(transcripcion, 'lengua_a_es', exp.lengua.codigo, exp.lengua.nombre, resultados)
+                resultados, verificacion_trad = _v['resultados'][:top_k], _v['verificacion']
                 mejor = resultados[0] if resultados else None
                 traduccion_data = {
                     'direccion': f'{exp.lengua.codigo}→es' if direccion == 'lengua_a_es' else f'es→{exp.lengua.codigo}',
@@ -1239,8 +1242,9 @@ class TranscribirTraducirView(APIView):
                         'fuente': mejor['fuente'],
                     } if mejor else None,
                     'resultados': resultados,
-                    'en_glosario': salida_trad['en_glosario'],
+                    'en_glosario': salida_trad['en_glosario'] or verificacion_trad.get('estado') in ('confirmada', 'ajustada', 'compuesta'),
                     'aviso': salida_trad['aviso'],
+                    'verificacion': verificacion_trad,
                 }
         except Exception as exc:
             logger.error('Error en traducción post-transcripción: %s', exc, exc_info=True)
