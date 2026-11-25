@@ -1085,9 +1085,18 @@ class TranscribirView(APIView):
             model, processor = model_service.load_asr_model(
                 exp.ruta_modelo_entrenado, exp.modelo_base.tipo
             )
-            transcripcion = model_service.transcribe_audio(
-                tmp_path, model, processor, exp.modelo_base.tipo
+            alternativas = model_service.transcribe_audio_nbest(
+                tmp_path, model, processor, exp.modelo_base.tipo, n=3
             )
+            transcripcion = alternativas[0] if alternativas else ''
+            reorden = None
+            if len(alternativas) > 1:
+                try:
+                    from traduccion.reranking import elegir_transcripcion
+                    idx_elegida, reorden = elegir_transcripcion(alternativas, exp.lengua.codigo)
+                    transcripcion = alternativas[idx_elegida]
+                except Exception as exc:
+                    logger.warning('Reordenamiento n-best falló: %s', exc)
         except Exception as exc:
             logger.error('Error en transcripción: %s', exc, exc_info=True)
             return Response(
@@ -1104,6 +1113,9 @@ class TranscribirView(APIView):
             'lengua': exp.lengua.codigo,
             'modelo': exp.nombre,
             'transcripcion': transcripcion,
+            'transcripciones_alternativas': alternativas,
+            'transcripcion_reordenada': bool(reorden and not reorden[0]['elegida']),
+            'evidencia_glosario': reorden,
         })
 
 
