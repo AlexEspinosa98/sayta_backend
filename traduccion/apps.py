@@ -61,6 +61,8 @@ def _precalentar():
                 logger.warning('Precarga semántica %s: %s', codigo, exc)
         for l in Lengua.objects.filter(activa=True):
             lexico.indice(l.codigo)
+        from traduccion import audio_ejemplo
+        audio_ejemplo.indice()
         logger.info('Traductor precargado (%d lenguas)', len(engine.available_languages()))
     except Exception as exc:
         logger.warning('No se pudo precargar el traductor: %s', exc)

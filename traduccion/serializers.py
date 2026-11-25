@@ -30,6 +30,7 @@ class ResultadoTraduccionSerializer(serializers.Serializer):
     nota = serializers.CharField(allow_blank=True, required=False)
     hipotesis = serializers.BooleanField(required=False, help_text='True si la entrada es una hipótesis aún no validada con hablantes.')
     verificado = serializers.BooleanField(required=False)
+    audio_ejemplo = serializers.BooleanField(required=False, help_text='True si existe una grabación real de la comunidad con esta transcripción.')
     mejor_coincidencia = serializers.BooleanField(
         help_text='True en el resultado con mayor probabilidad (el que más sentido tiene).'
     )

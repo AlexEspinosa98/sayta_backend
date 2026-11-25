@@ -255,3 +255,32 @@ class HistorialGlosarioView(APIView):
             'id': h.id, 'termino_id': h.termino_id or h.termino_id_original, 'termino': h.termino_texto, 'lengua': h.lengua_codigo,
             'accion': h.accion, 'cambios': h.cambios, 'usuario': h.usuario_nombre or 'sistema', 'origen': h.origen, 'creado_en': h.creado_en.isoformat(),
         } for h in qs[:limite]]})
+
+
+class AudioEjemploView(APIView):
+    """GET ?lengua=<codigo>&texto=<término en lengua>[&n=0][&archivo=1] → lista de grabaciones reales con esa transcripción, o el archivo de audio."""
+    permission_classes = [EjecutarTraduccion]
+
+    @extend_schema(tags=['Traducción'], summary='Grabación real de la comunidad cuya transcripción coincide con el término (así suena)')
+    def get(self, request):
+        import mimetypes
+        from django.http import FileResponse
+        from . import audio_ejemplo
+        texto = request.query_params.get('texto', '')
+        codigo = request.query_params.get('lengua', '')
+        lista = audio_ejemplo.ejemplos(texto, codigo, 5)
+        if request.query_params.get('archivo') in ('1', 'true'):
+            try:
+                n = int(request.query_params.get('n', 0))
+            except ValueError:
+                n = 0
+            if not lista or n >= len(lista):
+                return Response({'error': 'No hay grabación de ejemplo para ese texto.'}, status=status.HTTP_404_NOT_FOUND)
+            e = lista[n]
+            ruta = audio_ejemplo.ruta_archivo(e['comunidad'], e['jornada'], e['audio'])
+            if ruta is None:
+                return Response({'error': 'Archivo no disponible.'}, status=status.HTTP_404_NOT_FOUND)
+            ct, _ = mimetypes.guess_type(str(ruta))
+            return FileResponse(open(ruta, 'rb'), content_type=ct or 'application/octet-stream')
+        return Response({'texto': texto, 'lengua': codigo, 'total': len(lista),
+                         'ejemplos': [{'comunidad': e['comunidad'], 'jornada': e['jornada'], 'audio': e['audio'], 'etiqueta': e['etiqueta'], 'n': i} for i, e in enumerate(lista)]})

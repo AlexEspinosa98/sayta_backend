@@ -168,6 +168,12 @@ class TraducirView(APIView):
                 v = agentes.verificar(texto, direccion_input, lengua.codigo, lengua.nombre, resultados)
                 resultados, verificacion = v['resultados'], v['verificacion']
             resultados = resultados[:4]
+            try:
+                from . import audio_ejemplo
+                for r in resultados:
+                    r['audio_ejemplo'] = audio_ejemplo.tiene_ejemplo(r.get('termino', ''), lengua.codigo)
+            except Exception as exc:
+                logger.debug('audio_ejemplo: %s', exc)
         except ValueError as exc:
             return Response({'error': str(exc)}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
         except Exception as exc:
