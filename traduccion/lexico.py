@@ -378,4 +378,37 @@ def piezas_en_texto(texto: str, codigo: str, direccion: str, max_n: int = 4) -> 
             ocupado[p] = True
         piezas.append({'fragmento': ' '.join(toks_orig[i:j]), 'equivalente': e['termino'] if direccion == 'es_a_lengua' else e['termino_es'],
                        'termino_lengua': e['termino'], 'termino_es': e['termino_es'], 'inicio': i, 'fin': j})
+    # cláusulas: «me duele la cabeza y tengo fiebre» → cada parte se busca como frase (exacta/aproximada/patrón)
+    cubiertas = set(range(n)) - {p for p in range(n) if not ocupado[p]}
+    clausulas = []
+    ini = 0
+    for m in re.finditer(r'[,;:¿?¡!.]| y | o | e | u |\bpero\b', texto):
+        seg = texto[ini:m.start()].strip(' ,;:¿?¡!.')
+        if seg:
+            clausulas.append((ini, seg))
+        ini = m.end()
+    seg = texto[ini:].strip(' ,;:¿?¡!.')
+    if seg:
+        clausulas.append((ini, seg))
+    if len(clausulas) > 1:
+        pos_tok = []  # posición de inicio de cada token en el texto
+        cursor = 0
+        for t in toks_orig:
+            cursor = texto.find(t, cursor)
+            pos_tok.append(cursor)
+            cursor += len(t)
+        for car, seg in clausulas:
+            idxs = [i for i, p in enumerate(pos_tok) if car <= p < car + len(seg) + 1]
+            if not idxs or all(ocupado[i] for i in idxs):
+                continue
+            hits = buscar_patrones(seg, codigo, direccion) + buscar_lexico(seg, codigo, direccion, max_resultados=1)
+            hits = [h for h in hits if h['confianza'] >= 80 and h['nivel'] in ('exacta', 'aproximada')]
+            if not hits:
+                continue
+            h = hits[0]
+            for i in idxs:
+                ocupado[i] = True
+            piezas = [p for p in piezas if not (idxs[0] <= p['inicio'] < idxs[-1] + 1)]
+            piezas.append({'fragmento': seg, 'equivalente': h['termino'] if direccion == 'es_a_lengua' else h['termino_es'],
+                           'termino_lengua': h['termino'], 'termino_es': h['termino_es'], 'inicio': idxs[0], 'fin': idxs[-1] + 1})
     return sorted(piezas, key=lambda p: p['inicio'])

@@ -44,7 +44,7 @@ def activo() -> bool:
 def _llamar_llm(prompt: str, timeout: float) -> Dict:
     url = str(_cfg('OLLAMA_URL', 'http://cits-ollama:11434')).rstrip('/') + '/api/generate'
     modelo = str(_cfg('OLLAMA_MODELO', 'qwen2.5:7b'))
-    cuerpo = json.dumps({'model': modelo, 'prompt': prompt, 'stream': False, 'format': 'json',
+    cuerpo = json.dumps({'model': modelo, 'prompt': prompt, 'stream': False, 'format': 'json', 'keep_alive': '2h',
                          'options': {'temperature': 0.1, 'num_predict': 320}}).encode('utf-8')
     req = urllib.request.Request(url, data=cuerpo, headers={'Content-Type': 'application/json'})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -78,7 +78,7 @@ Piezas del glosario encontradas DENTRO del texto (útiles si hay que componer):
 {piezas_txt}
 
 Tareas:
-1. Decide si alguno de los candidatos traduce correctamente TODO el texto. Si es así, "eleccion" es su número y "compuesta" es false.
+1. Decide si alguno de los candidatos traduce correctamente TODO el texto. Si es así, "eleccion" es su número y "compuesta" es false. Si un candidato solo cubre UNA PARTE del texto, no lo des por bueno: usa las piezas para componer (tarea 2) y anota lo que falte en "sin_traducir".
 2. Si ningún candidato cubre todo el texto pero las piezas sí lo cubren en gran parte, compón la traducción a partir de las piezas ("compuesta": true, "eleccion": null) y di qué partes quedaron sin traducir.
 3. Si nada corresponde, "coherente": false, "eleccion": null, "traduccion_final": "".
 {regla_destino}
@@ -87,6 +87,18 @@ Tareas:
 
 Responde SOLO con JSON con exactamente estas claves:
 {{"eleccion": <número o null>, "coherente": true|false, "compuesta": true|false, "traduccion_final": "<texto>", "sin_traducir": ["<fragmentos>"], "explicacion": "<texto>", "confianza": <0-100>}}"""
+
+
+def _cobertura(texto: str, parte: str) -> float:
+    """Fracción de las palabras del texto que están en `parte` (normalizadas)."""
+    t = lexico.normalizar(texto).split()
+    p = set(lexico.normalizar(parte).split())
+    return (sum(1 for w in t if w in p) / len(t)) if t else 1.0
+
+
+def _resto_sin_cubrir(texto: str, parte: str) -> str:
+    p = set(lexico.normalizar(parte).split())
+    return ' '.join(w for w in re.split(r'\s+', texto.strip()) if lexico.normalizar(w) and lexico.normalizar(w) not in p)
 
 
 def _tokens_permitidos(candidatos: List[Dict], piezas: List[Dict]) -> set:
@@ -154,6 +166,16 @@ def verificar(texto: str, direccion: str, lengua_codigo: str, lengua_nombre: str
         ver['eleccion'] = idx
         ver['traduccion_final'] = (elegido['termino'] if direccion == 'es_a_lengua' else elegido['termino_es']) if not final else final
         ver['estado'] = 'confirmada' if idx == 0 else 'ajustada'
+        # cobertura: ¿la candidata abarca todo el texto o solo un trozo?
+        lado = elegido['termino'] if direccion == 'lengua_a_es' else elegido['termino_es']
+        cobertura = _cobertura(texto, lado)
+        if cobertura < 0.7:
+            ver['estado'] = 'parcial'
+            ver['confianza'] = min(ver['confianza'] or 0, int(cobertura * 100) + 10)
+            resto = _resto_sin_cubrir(texto, lado)
+            if resto and resto not in ver['sin_traducir']:
+                ver['sin_traducir'].append(resto)
+            ver['explicacion'] = (ver['explicacion'] + ' ').strip() + ' [Guardián: la opción cubre solo una parte del texto.]'
         elegido = dict(elegido, verificado=True)
         nuevos = [elegido] + [r for i, r in enumerate(nuevos) if i != idx]
     elif compuesta:
