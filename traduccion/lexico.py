@@ -52,7 +52,7 @@ def _variantes_es(termino_es: str) -> List[str]:
 # ---------------------------------------------------------------------------
 
 class _IndiceLexico:
-    TTL = 120  # segundos entre comprobaciones de cambios en BD
+    TTL = 30  # segundos entre comprobaciones de cambios en BD (además se invalida al guardar un término)
 
     def __init__(self, codigo: str):
         self.codigo = codigo
@@ -107,6 +107,15 @@ class _IndiceLexico:
 
 _indices: Dict[str, _IndiceLexico] = {}
 _indices_lock = threading.Lock()
+
+
+def invalidar(codigo: Optional[str] = None) -> None:
+    """Fuerza la recarga del índice léxico en la próxima consulta (tras crear/editar términos)."""
+    with _indices_lock:
+        objetivos = [_indices[codigo]] if codigo and codigo in _indices else list(_indices.values())
+    for idx in objetivos:
+        idx._comprobado = 0.0
+        idx._firma = None
 
 
 def indice(codigo: str) -> _IndiceLexico:
