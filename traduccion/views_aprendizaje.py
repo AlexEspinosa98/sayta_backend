@@ -290,6 +290,51 @@ class FaltanteView(APIView):
         return Response(_faltante_dict(f))
 
 
+def _tts_url() -> str:
+    import os
+    from django.conf import settings
+    return str(getattr(settings, 'SAYTA_TTS_URL', os.environ.get('SAYTA_TTS_URL', 'http://sayta-tts:8010'))).rstrip('/')
+
+
+class SintesisVozView(APIView):
+    """
+    Voz sintética experimental (servicio sayta-tts, modelo VITS entrenado con voces de la comunidad).
+    GET /traduccion/sintetizar/?lengua=<codigo>&texto=<texto en lengua>[&hablante=spkNN] → audio/wav
+    GET /traduccion/sintetizar/?estado=1 → {lengua: {disponible, ...}}
+    """
+    permission_classes = [EjecutarTraduccion]
+
+    @extend_schema(tags=['Traducción'], summary='Voz sintética (experimental) para un texto en la lengua; ?estado=1 dice qué lenguas la tienen')
+    def get(self, request):
+        import urllib.error
+        import urllib.parse
+        import urllib.request
+        from django.http import HttpResponse
+        base = _tts_url()
+        try:
+            if request.query_params.get('estado') in ('1', 'true'):
+                with urllib.request.urlopen(base + '/estado', timeout=20) as r:
+                    return Response(__import__('json').loads(r.read().decode('utf-8')))
+            q = {'lengua': request.query_params.get('lengua', ''), 'texto': request.query_params.get('texto', '')[:400]}
+            if request.query_params.get('hablante'):
+                q['hablante'] = request.query_params['hablante']
+            with urllib.request.urlopen(base + '/sintetizar?' + urllib.parse.urlencode(q), timeout=60) as r:
+                resp = HttpResponse(r.read(), content_type='audio/wav')
+                for h in ('X-TTS-Hablante', 'X-TTS-Ms', 'X-TTS-Checkpoint'):
+                    if r.headers.get(h):
+                        resp[h] = r.headers[h]
+                resp['Cache-Control'] = 'private, max-age=3600'
+                return resp
+        except urllib.error.HTTPError as exc:
+            detalle = exc.read().decode('utf-8', 'ignore')[:300]
+            return Response({'error': 'El servicio de voz respondió con error.', 'detalle': detalle, 'disponible': False},
+                            status=status.HTTP_404_NOT_FOUND if exc.code == 404 else status.HTTP_502_BAD_GATEWAY)
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            if request.query_params.get('estado') in ('1', 'true'):
+                return Response({'kogui': {'disponible': False}, '1': {'disponible': False}, 'error': str(exc)[:200]})
+            return Response({'error': 'Servicio de voz no disponible.', 'disponible': False}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
 class AudioFraseView(APIView):
     """
     Voz por piezas reales. GET ?lengua=<codigo>&piezas=<t1>||<t2>||...[&archivo=1]
