@@ -143,7 +143,7 @@ def _resultado(e: Dict, confianza: int, nivel: str, coincidencia: str, fuente: s
     }
 
 
-def buscar_lexico(texto: str, codigo: str, direccion: str, max_resultados: int = 5) -> List[Dict]:
+def buscar_lexico(texto: str, codigo: str, direccion: str, max_resultados: int = 5, prefijos: bool = False) -> List[Dict]:
     """
     direccion = 'lengua_a_es' → compara el texto con el término indígena (y sinónimos).
     direccion = 'es_a_lengua' → compara con el término en español (y sus variantes).
@@ -203,6 +203,16 @@ def buscar_lexico(texto: str, codigo: str, direccion: str, max_resultados: int =
                     hallazgos[e['termino']] = _resultado(e, conf, 'parcial', texto, nota='El texto es parte de una entrada más larga del glosario.')
                     break
 
+    # 4) prefijo (solo para sugerencias mientras se escribe): «jiba ka» → «Jiba kalde», «fieb» → «fiebre»
+    if prefijos and len(q) >= 3:
+        for e in idx.entradas:
+            if e['termino'] in hallazgos:
+                continue
+            for k in claves(e):
+                if k.startswith(q) and k != q:
+                    cobertura = len(q) / max(len(k), 1)
+                    hallazgos[e['termino']] = _resultado(e, int(round(50 + 20 * cobertura)), 'prefijo', texto, nota='Empieza igual que lo escrito.')
+                    break
     salida = sorted(hallazgos.values(), key=lambda r: -r['confianza'])
     return salida[:max_resultados]
 

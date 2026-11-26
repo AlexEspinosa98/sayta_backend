@@ -96,7 +96,7 @@ class TranslationPipeline:
         # 1) capa léxica y patrones
         lexicos = []
         try:
-            lexicos = lexico.buscar_patrones(texto, self._language_code, direccion) + lexico.buscar_lexico(texto, self._language_code, direccion)
+            lexicos = lexico.buscar_patrones(texto, self._language_code, direccion) + lexico.buscar_lexico(texto, self._language_code, direccion, max_resultados=8 if solo_lexico else 5, prefijos=solo_lexico)
         except Exception as exc:
             logger.warning('Capa léxica falló (%s); se continúa con semántica', exc)
         for r in lexicos:

@@ -90,6 +90,14 @@ class LexicoTests(TestCase):
         lexico.invalidar('Kogui')
         self.assertEqual(lexico.buscar_lexico('zzznuevo', 'Kogui', 'lengua_a_es')[0]['confianza'], 100)
 
+    def test_prefijo_solo_en_modo_sugerencias(self):
+        self.assertFalse([r for r in lexico.buscar_lexico('munz', 'Kogui', 'lengua_a_es') if r['nivel'] == 'prefijo'])
+        r = lexico.buscar_lexico('munz', 'Kogui', 'lengua_a_es', prefijos=True)
+        self.assertEqual(r[0]['termino'], 'Munzhi zhawa')
+        self.assertEqual(r[0]['nivel'], 'prefijo')
+        r2 = lexico.buscar_lexico('fieb', 'Kogui', 'es_a_lengua', prefijos=True)
+        self.assertEqual(r2[0]['termino_es'], 'fiebre')
+
     def test_reordenamiento_nbest_prefiere_evidencia(self):
         i, det = reranking.elegir_transcripcion(['Abi ishaa mikzek', 'Abbi isha mikzek', 'Avi isa'], 'Kogui')
         self.assertEqual(i, 1)
