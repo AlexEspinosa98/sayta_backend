@@ -296,6 +296,13 @@ def _tts_url() -> str:
     return str(getattr(settings, 'SAYTA_TTS_URL', os.environ.get('SAYTA_TTS_URL', 'http://sayta-tts:8010'))).rstrip('/')
 
 
+def _tts_publico() -> bool:
+    """Mientras la voz sintética esté en entrenamiento solo la ven los superusuarios. SAYTA_TTS_PUBLICO=1 la abre a todos."""
+    import os
+    from django.conf import settings
+    return str(getattr(settings, 'SAYTA_TTS_PUBLICO', os.environ.get('SAYTA_TTS_PUBLICO', '0'))).lower() in ('1', 'true', 'si', 'sí')
+
+
 class SintesisVozView(APIView):
     """
     Voz sintética experimental (servicio sayta-tts, modelo VITS entrenado con voces de la comunidad).
@@ -311,8 +318,15 @@ class SintesisVozView(APIView):
         import urllib.request
         from django.http import HttpResponse
         base = _tts_url()
+        es_estado = request.query_params.get('estado') in ('1', 'true')
+        if not _tts_publico() and not getattr(request.user, 'is_superuser', False):
+            # voz en entrenamiento: oculta para la comunidad hasta que pase la prueba de calidad
+            if es_estado:
+                return Response({'kogui': {'disponible': False}, '1': {'disponible': False}, 'en_pruebas': True})
+            return Response({'error': 'La voz sintética está en pruebas y aún no es pública.', 'disponible': False},
+                            status=status.HTTP_404_NOT_FOUND)
         try:
-            if request.query_params.get('estado') in ('1', 'true'):
+            if es_estado:
                 with urllib.request.urlopen(base + '/estado', timeout=20) as r:
                     return Response(__import__('json').loads(r.read().decode('utf-8')))
             q = {'lengua': request.query_params.get('lengua', ''), 'texto': request.query_params.get('texto', '')[:400]}
