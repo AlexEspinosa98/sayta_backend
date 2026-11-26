@@ -226,3 +226,38 @@ class GuardianComposicionTests(TestCase):
         permitidos = _tokens_permitidos('mi hermano come arepa', candidatos, piezas)
         self.assertIn('natue', permitidos)
         self.assertNotIn('niuwi', permitidos)
+
+
+class SintesisVozGatingTests(TestCase):
+    """Mientras la voz sintética entrena, solo los superusuarios la ven; el resto recibe «no disponible»."""
+
+    def _get(self, user, **params):
+        from unittest import mock
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from .views_aprendizaje import SintesisVozView
+        req = APIRequestFactory().get('/api/traduccion/sintetizar/', params)
+        force_authenticate(req, user=user)
+        with mock.patch('traduccion.views_aprendizaje._tts_publico', return_value=False), \
+             mock.patch.object(SintesisVozView, 'permission_classes', []):
+            return SintesisVozView.as_view()(req)
+
+    def test_usuario_normal_no_ve_la_voz(self):
+        from django.contrib.auth import get_user_model
+        u = get_user_model().objects.create_user('comunidad', password='x')
+        r = self._get(u, estado='1')
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.data['kogui']['disponible'])
+        self.assertTrue(r.data.get('en_pruebas'))
+        r = self._get(u, lengua='Kogui', texto='nuge')
+        self.assertEqual(r.status_code, 404)
+
+    def test_superusuario_pasa_al_servicio(self):
+        from unittest import mock
+        from django.contrib.auth import get_user_model
+        su = get_user_model().objects.create_superuser('admin', 'a@a.co', 'x')
+        fake = mock.MagicMock()
+        fake.__enter__.return_value.read.return_value = b'{"kogui": {"disponible": true}}'
+        with mock.patch('urllib.request.urlopen', return_value=fake):
+            r = self._get(su, estado='1')
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.data['kogui']['disponible'])
