@@ -252,12 +252,16 @@ def transcribe_audio_nbest(audio_path: str, model, processor, tipo: str, languag
         input_features = input_features.to(next(model.parameters()).device)
     except Exception:
         pass
+    # Medido (2026-11-26, 80 audios Kogui de evaluación limpia): las n secuencias de la búsqueda por haces
+    # salen idénticas tras normalizar (0 % de diversidad). Lo que sí da alternativas distintas es combinar la
+    # mejor hipótesis por haces con hipótesis muestreadas (temperatura 0,7): 2,2 hipótesis distintas por clip,
+    # oráculo WER 40 % frente a 52 % de la mejor sola.
     with torch.no_grad():
-        if n <= 1:
-            ids = model.generate(input_features, language=language, task='transcribe')
-        else:
-            ids = model.generate(input_features, language=language, task='transcribe', num_beams=max(4, n), num_return_sequences=n)
-    textos = [t.strip() for t in processor.batch_decode(ids, skip_special_tokens=True)]
+        ids = model.generate(input_features, language=language, task='transcribe', num_beams=4)
+        textos = [t.strip() for t in processor.batch_decode(ids, skip_special_tokens=True)]
+        if n > 1:
+            ids2 = model.generate(input_features, language=language, task='transcribe', do_sample=True, temperature=0.7, num_return_sequences=n - 1)
+            textos += [t.strip() for t in processor.batch_decode(ids2, skip_special_tokens=True)]
     unicos = []
     for t in textos:
         if t and t not in unicos:
