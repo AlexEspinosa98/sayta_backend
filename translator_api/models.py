@@ -57,6 +57,9 @@ class AudioMetadato(models.Model):
     sexo = models.CharField(max_length=20, blank=True)
     edad_aprox = models.CharField(max_length=30, blank=True)
     notas = models.TextField(blank=True)
+    # Traducción al español de lo que dice el audio: con la transcripción (.txt) forma el corpus
+    # paralelo lengua ↔ español que hace posible un traductor de oraciones.
+    traduccion_es = models.TextField(blank=True, default='')
     usuario = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='metadatos_audio')
     actualizado_en = models.DateTimeField(auto_now=True)
 

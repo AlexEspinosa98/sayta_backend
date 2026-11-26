@@ -16,6 +16,7 @@ from .views import (
     session_metadatos_view,
     session_metadato_view,
     hablantes_view,
+    paralelo_view,
 )
 
 
@@ -38,6 +39,7 @@ urlpatterns = [
     path('grabaciones/<str:community>/<str:session>/etiqueta/<str:filename>/historial/', session_etiqueta_historial_view, name='session_etiqueta_historial'),
     path('grabaciones/<str:community>/<str:session>/estado/', session_estado_view, name='session_estado'),
     path('grabaciones/<str:community>/hablantes/', hablantes_view, name='hablantes'),
+    path('grabaciones/<str:community>/paralelo/', paralelo_view, name='paralelo'),
     path('grabaciones/<str:community>/<str:session>/metadatos/', session_metadatos_view, name='session_metadatos'),
     path('grabaciones/<str:community>/<str:session>/metadato/<str:filename>/', session_metadato_view, name='session_metadato'),
 ]

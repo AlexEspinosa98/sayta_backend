@@ -15,7 +15,7 @@ from rest_framework.views import APIView
 
 from roles.permissions import requiere_permiso
 from . import lexico
-from .models import ConsultaTraduccion, CorreccionTraduccion, HistorialTermino
+from .models import ConsultaTraduccion, CorreccionTraduccion, HistorialTermino, TerminoFaltante
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +24,66 @@ VerGlosario = requiere_permiso('glosario', 'ver')
 EditarGlosario = requiere_permiso('glosario', 'editar')
 
 
+def registrar_faltantes(lengua, direccion, texto, verificacion):
+    """Cada hueco de la frase armada por piezas se acumula como término faltante (lista de recolección)."""
+    try:
+        honesta = (verificacion or {}).get('compuesta_honesta') or {}
+        huecos = honesta.get('huecos') or []
+        if not huecos:
+            return 0
+        n = 0
+        for h in huecos[:12]:
+            norm = lexico.normalizar(h)[:200]
+            if len(norm) < 2:
+                continue
+            with transaction.atomic():
+                obj, creado = TerminoFaltante.objects.select_for_update().get_or_create(
+                    lengua=lengua, direccion=direccion, texto_normalizado=norm,
+                    defaults={'texto': h[:200], 'ejemplo_frase': texto[:500]})
+                if not creado:
+                    if obj.estado == 'resuelto':
+                        continue            # ya está en el glosario: si sigue saliendo como hueco es por otra forma
+                    obj.veces += 1
+                    if not obj.ejemplo_frase:
+                        obj.ejemplo_frase = texto[:500]
+                    obj.save(update_fields=['veces', 'ejemplo_frase', 'ultima_vez'])
+            n += 1
+        return n
+    except Exception as exc:
+        logger.warning('No se pudieron registrar los términos faltantes: %s', exc)
+        return 0
+
+
+def resolver_faltantes(lengua_codigo: str | None = None) -> int:
+    """Marca como resueltos los faltantes que ya tienen coincidencia exacta en el glosario."""
+    qs = TerminoFaltante.objects.filter(estado='pendiente').select_related('lengua')
+    if lengua_codigo:
+        qs = qs.filter(lengua__codigo=lengua_codigo)
+    n = 0
+    for f in qs[:500]:
+        try:
+            hits = lexico.buscar_lexico(f.texto, f.lengua.codigo, f.direccion, max_resultados=1)
+        except Exception:
+            continue
+        if hits and hits[0].get('nivel') == 'exacta':
+            from terminos.models import TerminoLeng
+            f.estado = 'resuelto'
+            f.termino = TerminoLeng.objects.filter(lengua=f.lengua, termino=hits[0]['termino'], activo=True).first()
+            f.save(update_fields=['estado', 'termino', 'ultima_vez'])
+            n += 1
+    return n
+
+
+def _faltante_dict(f: TerminoFaltante) -> dict:
+    return {'id': f.id, 'lengua': f.lengua.codigo, 'lengua_nombre': f.lengua.nombre, 'direccion': f.direccion,
+            'texto': f.texto, 'ejemplo_frase': f.ejemplo_frase, 'veces': f.veces, 'estado': f.estado, 'nota': f.nota,
+            'termino': f.termino.termino if f.termino else None,
+            'primera_vez': f.primera_vez.isoformat(), 'ultima_vez': f.ultima_vez.isoformat()}
+
+
 def registrar_consulta(request, lengua, direccion, texto, salida, verificacion, ms_total, origen='texto'):
     """Guarda la consulta (nunca rompe la traducción si falla)."""
+    registrar_faltantes(lengua, direccion, texto, verificacion)
     try:
         mejor = salida['resultados'][0] if salida.get('resultados') else None
         c = ConsultaTraduccion.objects.create(
@@ -197,11 +255,66 @@ class PendientesValidacionView(APIView):
         if request.query_params.get('lengua'):
             hip = hip.filter(lengua__codigo=request.query_params['lengua'])
         ya = set(CorreccionTraduccion.objects.filter(tipo='validacion_hipotesis', veredicto='pendiente').values_list('termino_id', flat=True))
+        try:
+            resolver_faltantes(request.query_params.get('lengua'))
+        except Exception as exc:
+            logger.debug('resolver_faltantes: %s', exc)
+        falt = TerminoFaltante.objects.filter(estado='pendiente').select_related('lengua', 'termino')
+        if request.query_params.get('lengua'):
+            falt = falt.filter(lengua__codigo=request.query_params['lengua'])
         return Response({
             'hipotesis': [{'id': t.id, 'lengua': t.lengua.codigo, 'termino': t.termino, 'termino_es': t.termino_es.termino if t.termino_es else '',
                            'definicion': t.definicion, 'pos': t.pos, 'con_validacion_pendiente': t.id in ya} for t in hip],
             'correcciones_pendientes': CorreccionTraduccion.objects.filter(veredicto='pendiente').count(),
+            'faltantes': [_faltante_dict(f) for f in falt[:100]],
+            'faltantes_total': falt.count(),
         })
+
+
+class FaltanteView(APIView):
+    """PATCH /traduccion/faltantes/<id>/ {estado: descartado|pendiente, nota} — marcar un término faltante."""
+    permission_classes = [EditarGlosario]
+
+    @extend_schema(tags=['Traducción'], summary='Descartar o reabrir un término faltante de la lista de recolección')
+    def patch(self, request, pk: int):
+        try:
+            f = TerminoFaltante.objects.select_related('lengua', 'termino').get(pk=pk)
+        except TerminoFaltante.DoesNotExist:
+            return Response({'error': 'No existe.'}, status=status.HTTP_404_NOT_FOUND)
+        estado = request.data.get('estado')
+        if estado in ('descartado', 'pendiente'):
+            f.estado = estado
+        if 'nota' in request.data:
+            f.nota = str(request.data.get('nota') or '')[:1000]
+        f.save()
+        return Response(_faltante_dict(f))
+
+
+class AudioFraseView(APIView):
+    """
+    Voz por piezas reales. GET ?lengua=<codigo>&piezas=<t1>||<t2>||...[&archivo=1]
+    Sin archivo: JSON con qué piezas tienen grabación. Con archivo=1: WAV encadenado.
+    """
+    permission_classes = [EjecutarTraduccion]
+
+    @extend_schema(tags=['Traducción'], summary='Lee una frase armada con el glosario encadenando grabaciones reales de cada pieza')
+    def get(self, request):
+        from django.http import HttpResponse
+        from . import audio_frase
+        codigo = request.query_params.get('lengua', '')
+        piezas = [p for p in (request.query_params.get('piezas') or '').split('||') if p.strip()][:24]
+        if not piezas:
+            return Response({'error': 'Faltan las piezas.'}, status=status.HTTP_400_BAD_REQUEST)
+        if request.query_params.get('archivo') in ('1', 'true'):
+            datos, resumen = audio_frase.sintetizar(piezas, codigo)
+            if not datos:
+                return Response({'error': 'Ninguna pieza tiene grabación.', **resumen}, status=status.HTTP_404_NOT_FOUND)
+            resp = HttpResponse(datos, content_type='audio/wav')
+            resp['Cache-Control'] = 'private, max-age=3600'
+            resp['X-Piezas-Con-Audio'] = f"{resumen['con_audio']}/{resumen['piezas']}"
+            return resp
+        _, resumen = audio_frase.elegir_clips(piezas, codigo)
+        return Response({'lengua': codigo, **resumen})
 
 
 class EstadisticasTraduccionView(APIView):
@@ -231,7 +344,20 @@ class EstadisticasTraduccionView(APIView):
             'sin_coincidencia_frecuentes': sin_coincidencia,
             'correcciones': {k: CorreccionTraduccion.objects.filter(veredicto=k).count() for k in ('pendiente', 'aprobada', 'rechazada')},
             'hipotesis_sin_validar': __import__('terminos.models', fromlist=['TerminoLeng']).TerminoLeng.objects.filter(tipo_morfema='hipótesis', activo=True).count(),
+            'faltantes_pendientes': TerminoFaltante.objects.filter(estado='pendiente').count(),
+            'corpus_paralelo': _corpus_paralelo(),
         })
+
+
+def _corpus_paralelo() -> dict:
+    """Frases de audio que ya tienen traducción al español (base del traductor de oraciones), por comunidad."""
+    try:
+        from translator_api.models import AudioMetadato
+        qs = AudioMetadato.objects.exclude(traduccion_es='').values('comunidad').annotate(n=Count('id'))
+        por = {r['comunidad']: r['n'] for r in qs}
+        return {'total': sum(por.values()), 'por_comunidad': por, 'meta': 2000}
+    except Exception:
+        return {'total': 0, 'por_comunidad': {}, 'meta': 2000}
 
 
 class HistorialGlosarioView(APIView):

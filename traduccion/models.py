@@ -81,6 +81,37 @@ class CorreccionTraduccion(models.Model):
         return f'{self.tipo} [{self.veredicto}] {self.texto_origen[:40]}'
 
 
+class TerminoFaltante(models.Model):
+    """
+    Palabra que la gente pidió traducir y no está en el glosario (hueco de una frase armada por
+    piezas). Se acumula cuántas veces se pidió; cuando alguien agrega el término al glosario pasa a
+    «resuelto». Es la lista de recolección para la comunidad.
+    """
+    ESTADOS = (('pendiente', 'Pendiente'), ('resuelto', 'Resuelto'), ('descartado', 'Descartado'))
+
+    lengua = models.ForeignKey('terminos.Lengua', on_delete=models.CASCADE, related_name='terminos_faltantes')
+    direccion = models.CharField(max_length=20, default='es_a_lengua')
+    texto = models.CharField(max_length=200)                       # como lo escribió la gente la primera vez
+    texto_normalizado = models.CharField(max_length=200, db_index=True)
+    ejemplo_frase = models.TextField(blank=True)                   # frase donde apareció el hueco
+    veces = models.IntegerField(default=1)
+    estado = models.CharField(max_length=12, choices=ESTADOS, default='pendiente', db_index=True)
+    termino = models.ForeignKey('terminos.TerminoLeng', null=True, blank=True, on_delete=models.SET_NULL, related_name='faltantes_resueltos')
+    nota = models.TextField(blank=True)
+    primera_vez = models.DateTimeField(auto_now_add=True)
+    ultima_vez = models.DateTimeField(auto_now=True, db_index=True)
+
+    class Meta:
+        db_table = 'traduccion_terminos_faltantes'
+        unique_together = ('lengua', 'direccion', 'texto_normalizado')
+        ordering = ['-veces', '-ultima_vez']
+        verbose_name = 'Término faltante'
+        verbose_name_plural = 'Términos faltantes'
+
+    def __str__(self):
+        return f'{self.texto} ({self.lengua_id}, {self.veces}×, {self.estado})'
+
+
 class HistorialTermino(models.Model):
     """Quién creó, editó, restauró o borró cada término del glosario, con el antes y el después."""
     ACCIONES = [('crear', 'Creó'), ('editar', 'Editó'), ('eliminar', 'Eliminó'), ('restaurar', 'Restauró'), ('desactivar', 'Desactivó')]

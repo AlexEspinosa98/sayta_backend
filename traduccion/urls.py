@@ -2,7 +2,8 @@ from django.urls import path
 
 from .views import TraducirView
 from .views_aprendizaje import (CorreccionesView, EleccionConsultaView, EstadisticasTraduccionView,
-                                AudioEjemploView, HistorialGlosarioView, PendientesValidacionView, RevisarCorreccionView)
+                                AudioEjemploView, AudioFraseView, FaltanteView, HistorialGlosarioView,
+                                PendientesValidacionView, RevisarCorreccionView)
 
 urlpatterns = [
     path('traducir/', TraducirView.as_view(), name='traduccion-traducir'),
@@ -13,4 +14,6 @@ urlpatterns = [
     path('estadisticas/', EstadisticasTraduccionView.as_view(), name='traduccion-estadisticas'),
     path('historial-glosario/', HistorialGlosarioView.as_view(), name='traduccion-historial-glosario'),
     path('audio-ejemplo/', AudioEjemploView.as_view(), name='traduccion-audio-ejemplo'),
+    path('audio-frase/', AudioFraseView.as_view(), name='traduccion-audio-frase'),
+    path('faltantes/<int:pk>/', FaltanteView.as_view(), name='traduccion-faltante'),
 ]

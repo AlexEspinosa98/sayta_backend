@@ -982,7 +982,10 @@ def etiquetado_actividad_view(request: HttpRequest):
 
 def _metadato_dict(m: AudioMetadato) -> Dict:
     return {"audio": m.audio, "hablante": m.hablante, "sexo": m.sexo, "edad_aprox": m.edad_aprox, "notas": m.notas,
-            "actualizado_en": m.actualizado_en.isoformat()}
+            "traduccion_es": m.traduccion_es, "actualizado_en": m.actualizado_en.isoformat()}
+
+
+_CAMPOS_METADATO = ("hablante", "sexo", "edad_aprox", "notas", "traduccion_es")
 
 
 @requiere_permiso_django('dataset_audio', 'ver')
@@ -1008,7 +1011,7 @@ def session_metadato_view(request: HttpRequest, community: str, session: str, fi
         return JsonResponse({"error": f"Audio '{filename}' no encontrado."}, status=404)
     obj = AudioMetadato.objects.filter(comunidad=community_dir.name, jornada=session_dir.name, audio=filename).first()
     if request.method == "GET":
-        return JsonResponse(_metadato_dict(obj) if obj else {"audio": filename, "hablante": "", "sexo": "", "edad_aprox": "", "notas": ""})
+        return JsonResponse(_metadato_dict(obj) if obj else {"audio": filename, **{k: "" for k in _CAMPOS_METADATO}})
     if request.method == "DELETE":
         if obj:
             obj.delete()
@@ -1017,7 +1020,11 @@ def session_metadato_view(request: HttpRequest, community: str, session: str, fi
         body = json.loads(request.body.decode("utf-8") or "{}")
     except json.JSONDecodeError:
         return JsonResponse({"error": "JSON inválido"}, status=400)
-    campos = {k: str(body.get(k, "") or "").strip()[:120 if k == "hablante" else 2000] for k in ("hablante", "sexo", "edad_aprox", "notas")}
+    # Actualización parcial: solo se tocan los campos que vienen en el cuerpo (así guardar la
+    # traducción no borra el hablante y viceversa).
+    campos = {k: str(body.get(k) or "").strip()[:120 if k == "hablante" else 2000] for k in _CAMPOS_METADATO if k in body}
+    if not campos:
+        return JsonResponse({"error": f"Envía al menos uno de: {', '.join(_CAMPOS_METADATO)}."}, status=400)
     if obj is None:
         obj = AudioMetadato(comunidad=community_dir.name, jornada=session_dir.name, audio=filename)
     for k, v in campos.items():
@@ -1025,6 +1032,38 @@ def session_metadato_view(request: HttpRequest, community: str, session: str, fi
     obj.usuario = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
     obj.save()
     return JsonResponse(_metadato_dict(obj))
+
+
+@requiere_permiso_django('dataset_audio', 'ver')
+def paralelo_view(request: HttpRequest, community: str):
+    """
+    GET: corpus paralelo de la comunidad (transcripción en lengua + traducción al español).
+    Sin parámetros devuelve el conteo; con ?descargar=1 devuelve JSONL para entrenar un traductor.
+    """
+    base = _build_grabaciones_path()
+    community_dir = next((d for d in base.iterdir() if d.is_dir() and d.name.lower() == community.lower()), None) if base.exists() else None
+    if community_dir is None:
+        return JsonResponse({"error": f"Comunidad '{community}' no encontrada."}, status=404)
+    pares = []
+    qs = AudioMetadato.objects.filter(comunidad=community_dir.name).exclude(traduccion_es="").order_by("jornada", "audio")
+    for m in qs:
+        txt = community_dir / m.jornada / "audios_procesados" / (Path(m.audio).stem + ".txt")
+        try:
+            lengua = txt.read_text(encoding="utf-8", errors="ignore").strip()
+        except OSError:
+            continue
+        if lengua:
+            pares.append({"comunidad": community_dir.name, "jornada": m.jornada, "audio": m.audio,
+                          "texto_lengua": lengua, "texto_es": m.traduccion_es, "hablante": m.hablante})
+    if request.GET.get("descargar") in ("1", "true"):
+        cuerpo = "\n".join(json.dumps(p, ensure_ascii=False) for p in pares) + ("\n" if pares else "")
+        resp = HttpResponse(cuerpo, content_type="application/x-ndjson; charset=utf-8")
+        resp["Content-Disposition"] = f'attachment; filename="paralelo_{community_dir.name}.jsonl"'
+        return resp
+    por_jornada: Dict[str, int] = {}
+    for p in pares:
+        por_jornada[p["jornada"]] = por_jornada.get(p["jornada"], 0) + 1
+    return JsonResponse({"comunidad": community_dir.name, "total": len(pares), "por_jornada": por_jornada, "meta": 2000})
 
 
 @requiere_permiso_django('dataset_audio', 'ver')

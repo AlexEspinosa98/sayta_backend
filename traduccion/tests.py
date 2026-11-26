@@ -144,3 +144,75 @@ class SplitEstableTests(TestCase):
         for s in ev:
             lado.setdefault(s['audio'].split('/')[-1].split('_')[0], set()).add('ev')
         self.assertTrue(all(len(v) == 1 for v in lado.values()), lado)
+
+
+class ComposicionTests(TestCase):
+    """Frase armada con piezas del glosario y huecos marcados; huecos registrados como faltantes."""
+
+    def setUp(self):
+        self.kg = Lengua.objects.create(codigo='Kogui', nombre='Kogui')
+        _t(self.kg, 'Natue', 'hermano')
+        _t(self.kg, 'Ñi', 'agua')
+        _t(self.kg, 'Guañ-gua zalda', 'fiebre')
+        lexico.invalidar()
+
+    def test_componer_marca_huecos_y_respeta_orden(self):
+        from . import composicion
+        texto = 'mi hermano come arepa'
+        piezas = lexico.piezas_en_texto(texto, 'Kogui', 'es_a_lengua')
+        c = composicion.componer(texto, 'es_a_lengua', piezas)
+        self.assertEqual(c['frase'], '[mi] Natue [come] [arepa]')
+        self.assertEqual(c['huecos'], ['mi', 'come', 'arepa'])
+        self.assertFalse(c['completa'])
+        self.assertEqual(c['piezas_audio'], ['Natue'])
+
+    def test_funcionales_no_son_faltantes(self):
+        from . import composicion
+        texto = 'el agua y la fiebre'
+        piezas = lexico.piezas_en_texto(texto, 'Kogui', 'es_a_lengua')
+        c = composicion.componer(texto, 'es_a_lengua', piezas)
+        self.assertEqual(c['frase'], '[el] Ñi [y] [la] Guañ-gua zalda')
+        self.assertEqual(c['huecos'], [])            # el / y / la son funcionales: no se piden a la comunidad
+        self.assertEqual(c['piezas_audio'], ['Ñi', 'Guañ-gua zalda'])
+
+    def test_completa_cuando_todo_esta_en_glosario(self):
+        from . import composicion
+        texto = 'hermano agua'
+        piezas = lexico.piezas_en_texto(texto, 'Kogui', 'es_a_lengua')
+        c = composicion.componer(texto, 'es_a_lengua', piezas)
+        self.assertTrue(c['completa'])
+        self.assertEqual(c['frase'], 'Natue Ñi')
+
+    def test_registrar_y_resolver_faltantes(self):
+        from .models import TerminoFaltante
+        from .views_aprendizaje import registrar_faltantes, resolver_faltantes
+        ver = {'compuesta_honesta': {'huecos': ['come', 'arepa']}}
+        registrar_faltantes(self.kg, 'es_a_lengua', 'mi hermano come arepa', ver)
+        registrar_faltantes(self.kg, 'es_a_lengua', 'ella come', {'compuesta_honesta': {'huecos': ['Come']}})
+        come = TerminoFaltante.objects.get(texto_normalizado='come')
+        self.assertEqual(come.veces, 2)
+        self.assertEqual(TerminoFaltante.objects.filter(estado='pendiente').count(), 2)
+        _t(self.kg, 'Kawu', 'come')   # alguien lo agrega al glosario
+        lexico.invalidar()
+        self.assertEqual(resolver_faltantes('Kogui'), 1)
+        come.refresh_from_db()
+        self.assertEqual(come.estado, 'resuelto')
+        self.assertEqual(come.termino.termino, 'Kawu')
+
+
+class AudioFraseTests(TestCase):
+    def test_elegir_clips_prefiere_misma_jornada(self):
+        from unittest import mock
+        from . import audio_frase
+        ejemplos = {
+            'natue': [{'comunidad': 'Kogui', 'jornada': 'j1', 'audio': 'a.wav'}, {'comunidad': 'Kogui', 'jornada': 'j2', 'audio': 'b.wav'}],
+            'ni': [{'comunidad': 'Kogui', 'jornada': 'j2', 'audio': 'c.wav'}],
+            'xyz': [],
+        }
+        with mock.patch.object(audio_frase.audio_ejemplo, 'ejemplos', side_effect=lambda p, c, n: [dict(e) for e in ejemplos[lexico.normalizar(p)]]), \
+             mock.patch.object(audio_frase, '_hablante', return_value=''):
+            elegidos, resumen = audio_frase.elegir_clips(['Natue', 'Ñi', 'xyz'], 'Kogui')
+        self.assertEqual([e['audio'] if e else None for e in elegidos], ['b.wav', 'c.wav', None])
+        self.assertEqual(resumen['con_audio'], 2)
+        self.assertEqual(resumen['faltantes'], ['xyz'])
+        self.assertEqual(resumen['jornadas'], ['j2'])

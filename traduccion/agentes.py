@@ -122,8 +122,18 @@ def verificar(texto: str, direccion: str, lengua_codigo: str, lengua_nombre: str
     except Exception as exc:
         logger.warning('piezas_en_texto falló: %s', exc)
 
+    # Composición honesta: la frase armada solo con piezas del glosario y los huecos marcados.
+    # Se adjunta siempre que haya piezas; el front la muestra cuando ninguna candidata cubre todo.
+    honesta = None
+    if piezas:
+        try:
+            from . import composicion
+            honesta = composicion.componer(texto, direccion, piezas)
+        except Exception as exc:
+            logger.warning('composicion.componer falló: %s', exc)
+
     base = {'estado': 'no_disponible', 'eleccion': None, 'traduccion_final': None, 'explicacion': '', 'confianza': None,
-            'sin_traducir': [], 'modelo': None, 'ms': 0, 'piezas': piezas}
+            'sin_traducir': [], 'modelo': None, 'ms': 0, 'piezas': piezas, 'compuesta_honesta': honesta}
     if not activo() or (not resultados and not piezas):
         base['estado'] = 'omitida' if not activo() else 'sin_coincidencia'
         base['ms'] = int((time.time() - inicio) * 1000)
