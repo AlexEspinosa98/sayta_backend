@@ -43,3 +43,28 @@ class EtiquetaHistorial(models.Model):
 
     def __str__(self):
         return f'{self.accion} {self.comunidad}/{self.jornada}/{self.audio} por {self.usuario_nombre or "?"}'
+
+
+class AudioMetadato(models.Model):
+    """
+    Datos por audio que no viven en el archivo: hablante (para separar entrenamiento y evaluación
+    por persona), sexo/edad aproximada opcionales y notas. Clave: comunidad + jornada + nombre de archivo.
+    """
+    comunidad = models.CharField(max_length=100, db_index=True)
+    jornada = models.CharField(max_length=200, db_index=True)
+    audio = models.CharField(max_length=255)
+    hablante = models.CharField(max_length=120, blank=True, db_index=True)
+    sexo = models.CharField(max_length=20, blank=True)
+    edad_aprox = models.CharField(max_length=30, blank=True)
+    notas = models.TextField(blank=True)
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='metadatos_audio')
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'audio_metadatos'
+        unique_together = ('comunidad', 'jornada', 'audio')
+        verbose_name = 'Metadato de audio'
+        verbose_name_plural = 'Metadatos de audio'
+
+    def __str__(self):
+        return f'{self.comunidad}/{self.jornada}/{self.audio}: {self.hablante or "?"}'

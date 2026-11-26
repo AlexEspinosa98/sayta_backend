@@ -537,9 +537,35 @@ def _clave_audio(path: str) -> str:
     return f'{p.parent.name}/{p.name}'
 
 
+def _mapa_hablantes(samples: List[Dict]) -> Dict[str, str]:
+    """{comunidad/jornada/archivo → hablante} para los audios que tengan hablante registrado (AudioMetadato)."""
+    try:
+        from translator_api.models import AudioMetadato
+    except Exception:
+        return {}
+    claves = {}
+    for s in samples:
+        p = Path(s['audio'])
+        # .../Grabaciones/<comunidad>/<jornada>/audios_sin_procesar/<archivo>
+        try:
+            claves[(p.parents[2].name, p.parents[1].name, p.name)] = s['audio']
+        except IndexError:
+            continue
+    if not claves:
+        return {}
+    comunidades = {c for c, _, _ in claves}
+    mapa = {}
+    for m in AudioMetadato.objects.filter(comunidad__in=comunidades).exclude(hablante='').values('comunidad', 'jornada', 'audio', 'hablante'):
+        ruta = claves.get((m['comunidad'], m['jornada'], m['audio']))
+        if ruta:
+            mapa[ruta] = f"{m['comunidad']}::{m['hablante'].strip().lower()}"
+    return mapa
+
+
 def dividir_train_eval(samples: List[Dict], porcentaje: int = _EVAL_PORCENTAJE) -> Tuple[List[Dict], List[Dict]]:
     """
-    Split train/eval ESTABLE y SIN FUGA, decidido por audio original.
+    Split train/eval ESTABLE y SIN FUGA, decidido por audio original, o por HABLANTE cuando el audio
+    tiene hablante registrado (así una misma voz nunca queda repartida entre entrenamiento y evaluación).
 
     - Estable: un audio cae siempre en el mismo lado (hash de su clave), aunque el corpus crezca
       o se entrene otra lengua. Así los experimentos comparten el mismo conjunto de evaluación y
@@ -550,8 +576,12 @@ def dividir_train_eval(samples: List[Dict], porcentaje: int = _EVAL_PORCENTAJE) 
     import hashlib
     train: List[Dict] = []
     ev: List[Dict] = []
+    hablantes = _mapa_hablantes(samples)
+    if hablantes:
+        logger.info('Split por hablante: %d de %d audios tienen hablante registrado (%d hablantes)', len(hablantes), len(samples), len(set(hablantes.values())))
     for s in samples:
-        h = int(hashlib.sha1(_clave_audio(s['audio']).encode('utf-8')).hexdigest()[:8], 16) % 100
+        clave = hablantes.get(s['audio']) or _clave_audio(s['audio'])
+        h = int(hashlib.sha1(clave.encode('utf-8')).hexdigest()[:8], 16) % 100
         (ev if h < porcentaje else train).append(s)
     if not ev and len(train) > 1:        # corpus diminuto: garantizar al menos 1 de evaluación
         ev.append(train.pop())

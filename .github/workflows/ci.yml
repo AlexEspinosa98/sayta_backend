@@ -1,0 +1,25 @@
+name: CI backend
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Instalar dependencias ligeras
+        run: pip install -r requirements-ci.txt
+      - name: Compilar todo el código
+        run: python -m compileall -q entrenamiento terminos traduccion translator_api roles usuarios sayta_backend
+      - name: Pruebas del traductor (léxico, patrones, n-best, separación por hablante)
+        env:
+          DJANGO_SECRET_KEY: ci-secret
+          SAYTA_SIN_PRECARGA: "1"
+        run: python manage.py test traduccion -v 2

@@ -13,7 +13,7 @@ from django.conf import settings
 from django.http import FileResponse, JsonResponse, HttpRequest, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from roles.decorators import requiere_permiso_django
-from .models import EtiquetaHistorial
+from .models import AudioMetadato, EtiquetaHistorial
 from .schema import OPENAPI_SCHEMA
 from .search_engine import load_metadata as se_load_metadata, semantic_search
 
@@ -975,3 +975,62 @@ def etiquetado_actividad_view(request: HttpRequest):
     } for r in resumen]
     recientes = [_evento_a_dict(e) for e in qs.select_related('usuario').order_by('-creado_en', '-id')[:limite]]
     return JsonResponse({"usuarios": usuarios, "recientes": recientes, "total_eventos": qs.count()})
+
+
+
+# ── Metadatos por audio (hablante) ──────────────────────────────────────────
+
+def _metadato_dict(m: AudioMetadato) -> Dict:
+    return {"audio": m.audio, "hablante": m.hablante, "sexo": m.sexo, "edad_aprox": m.edad_aprox, "notas": m.notas,
+            "actualizado_en": m.actualizado_en.isoformat()}
+
+
+@requiere_permiso_django('dataset_audio', 'ver')
+def session_metadatos_view(request: HttpRequest, community: str, session: str):
+    """GET: metadatos de todos los audios de la jornada {audio: {...}}."""
+    community_dir, session_dir, err = _get_session_or_404(community, session)
+    if err:
+        return err
+    qs = AudioMetadato.objects.filter(comunidad=community_dir.name, jornada=session_dir.name)
+    return JsonResponse({"comunidad": community_dir.name, "jornada": session_dir.name,
+                         "metadatos": {m.audio: _metadato_dict(m) for m in qs}})
+
+
+@requiere_permiso_django('dataset_audio', {'GET': 'ver', 'PUT': 'etiquetar', 'DELETE': 'etiquetar'})
+@csrf_exempt
+def session_metadato_view(request: HttpRequest, community: str, session: str, filename: str):
+    """GET/PUT/DELETE metadatos de un audio (hablante, sexo, edad aproximada, notas)."""
+    community_dir, session_dir, err = _get_session_or_404(community, session)
+    if err:
+        return err
+    audio_path = session_dir / "audios_sin_procesar" / filename
+    if not audio_path.is_file():
+        return JsonResponse({"error": f"Audio '{filename}' no encontrado."}, status=404)
+    obj = AudioMetadato.objects.filter(comunidad=community_dir.name, jornada=session_dir.name, audio=filename).first()
+    if request.method == "GET":
+        return JsonResponse(_metadato_dict(obj) if obj else {"audio": filename, "hablante": "", "sexo": "", "edad_aprox": "", "notas": ""})
+    if request.method == "DELETE":
+        if obj:
+            obj.delete()
+        return JsonResponse({"mensaje": "Metadatos eliminados."})
+    try:
+        body = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "JSON inválido"}, status=400)
+    campos = {k: str(body.get(k, "") or "").strip()[:120 if k == "hablante" else 2000] for k in ("hablante", "sexo", "edad_aprox", "notas")}
+    if obj is None:
+        obj = AudioMetadato(comunidad=community_dir.name, jornada=session_dir.name, audio=filename)
+    for k, v in campos.items():
+        setattr(obj, k, v)
+    obj.usuario = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
+    obj.save()
+    return JsonResponse(_metadato_dict(obj))
+
+
+@requiere_permiso_django('dataset_audio', 'ver')
+def hablantes_view(request: HttpRequest, community: str):
+    """GET: hablantes ya registrados en la comunidad (para autocompletar) con cuántos audios tiene cada uno."""
+    from django.db.models import Count
+    qs = (AudioMetadato.objects.filter(comunidad__iexact=community).exclude(hablante="")
+          .values("hablante").annotate(n=Count("id")).order_by("-n", "hablante"))
+    return JsonResponse({"comunidad": community, "hablantes": [{"hablante": r["hablante"], "audios": r["n"]} for r in qs]})

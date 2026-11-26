@@ -1,0 +1,6 @@
+# Dependencias mínimas para las pruebas rápidas en integración continua (sin torch/transformers).
+Django==5.2.11
+djangorestframework==3.17.1
+django-filter==25.2
+drf-spectacular==0.29.0
+python-dotenv==1.2.2
