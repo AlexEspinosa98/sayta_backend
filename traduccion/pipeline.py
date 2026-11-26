@@ -88,7 +88,8 @@ class TranslationPipeline:
     # API pública
     # ------------------------------------------------------------------
 
-    def traducir(self, texto: str, direccion: str = 'lengua_a_es', top_k: int = 3) -> Dict:
+    def traducir(self, texto: str, direccion: str = 'lengua_a_es', top_k: int = 3, solo_lexico: bool = False) -> Dict:
+        """solo_lexico=True: respuesta rápida (glosario + patrones, sin embeddings ni verificador) para sugerencias mientras se escribe."""
         texto = (texto or '').strip()
         candidatos: Dict[str, Dict] = {}
 
@@ -106,7 +107,8 @@ class TranslationPipeline:
         # 2) semántica (si hay motor para la lengua)
         errores_semantica: Optional[str] = None
         try:
-            self._semantica(texto, candidatos)
+            if not solo_lexico:
+                self._semantica(texto, candidatos)
         except ValueError as exc:          # lengua sin embedding activo
             errores_semantica = str(exc)
             if not candidatos:

@@ -230,7 +230,7 @@ def _release_cached_model(cached: Optional[Tuple]) -> None:
         logger.debug('No se pudo limpiar caché CUDA', exc_info=True)
 
 
-def transcribe_audio_nbest(audio_path: str, model, processor, tipo: str, language: str = 'es', n: int = 3) -> list:
+def transcribe_audio_nbest(audio_path: str, model, processor, tipo: str, language: str = 'es', n: int = 3, max_segundos: float = 0) -> list:
     """
     Devuelve hasta n transcripciones candidatas (la primera es la más probable). Para Whisper usa
     búsqueda por haces (beam search) con varias secuencias; para wav2vec2 solo hay una.
@@ -243,7 +243,9 @@ def transcribe_audio_nbest(audio_path: str, model, processor, tipo: str, languag
     except Exception as exc:
         raise RuntimeError(f'No se pudo cargar el audio {audio_path}: {exc}') from exc
 
-    if tipo != 'whisper' or n <= 1:
+    if max_segundos and len(speech) > int(max_segundos * 16000):
+        speech = speech[-int(max_segundos * 16000):]   # transcripción parcial en vivo: solo la ventana más reciente
+    if tipo != 'whisper':
         return [transcribe_audio(audio_path, model, processor, tipo, language)]
     input_features = processor(speech, sampling_rate=16000, return_tensors='pt').input_features
     try:
@@ -251,7 +253,10 @@ def transcribe_audio_nbest(audio_path: str, model, processor, tipo: str, languag
     except Exception:
         pass
     with torch.no_grad():
-        ids = model.generate(input_features, language=language, task='transcribe', num_beams=max(4, n), num_return_sequences=n)
+        if n <= 1:
+            ids = model.generate(input_features, language=language, task='transcribe')
+        else:
+            ids = model.generate(input_features, language=language, task='transcribe', num_beams=max(4, n), num_return_sequences=n)
     textos = [t.strip() for t in processor.batch_decode(ids, skip_special_tokens=True)]
     unicos = []
     for t in textos:

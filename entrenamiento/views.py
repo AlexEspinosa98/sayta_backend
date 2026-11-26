@@ -1085,8 +1085,9 @@ class TranscribirView(APIView):
             model, processor = model_service.load_asr_model(
                 exp.ruta_modelo_entrenado, exp.modelo_base.tipo
             )
+            parcial = str(request.query_params.get('parcial', request.data.get('parcial', ''))).lower() in ('1', 'true')
             alternativas = model_service.transcribe_audio_nbest(
-                tmp_path, model, processor, exp.modelo_base.tipo, n=3
+                tmp_path, model, processor, exp.modelo_base.tipo, n=1 if parcial else 3, max_segundos=30 if parcial else 0
             )
             transcripcion = alternativas[0] if alternativas else ''
             reorden = None
@@ -1116,6 +1117,7 @@ class TranscribirView(APIView):
             'transcripciones_alternativas': alternativas,
             'transcripcion_reordenada': bool(reorden and not reorden[0]['elegida']),
             'evidencia_glosario': reorden,
+            'parcial': parcial,
         })
 
 

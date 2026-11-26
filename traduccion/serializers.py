@@ -9,6 +9,7 @@ class TraducirRequestSerializer(serializers.Serializer):
         help_text='ID de la lengua indígena.'
     )
     verificar = serializers.BooleanField(required=False, default=True, help_text='Pasar el resultado por el agente verificador (modelo de lenguaje local).')
+    rapido = serializers.BooleanField(required=False, default=False, help_text='Modo sugerencias mientras se escribe: solo glosario y patrones (≈20 ms), sin semántica, sin verificador y sin registrar la consulta.')
     direccion = serializers.ChoiceField(
         choices=['es_a_lengua', 'lengua_a_es'],
         help_text=(

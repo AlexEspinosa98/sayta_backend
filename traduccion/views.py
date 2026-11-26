@@ -127,6 +127,9 @@ class TraducirView(APIView):
         lengua_id = serializer.validated_data['lengua_id']
         direccion_input = serializer.validated_data['direccion']
         verificar = serializer.validated_data.get('verificar', True)
+        rapido = serializer.validated_data.get('rapido', False)
+        if rapido:
+            verificar = False
         t_inicio = time.time()
 
         # --- Resolver lengua y embedding activo ---
@@ -161,13 +164,13 @@ class TraducirView(APIView):
             from translator_api.search_engine import MultiLanguageSearchEngine
             engine = MultiLanguageSearchEngine.get_instance()
             pipeline = TranslationPipeline(engine, language_code=lengua.codigo)
-            salida = pipeline.traducir(texto, direccion=direccion_input, top_k=5)
+            salida = pipeline.traducir(texto, direccion=direccion_input, top_k=6 if rapido else 5, solo_lexico=rapido)
             resultados = salida['resultados']
             verificacion = None
             if verificar:
                 v = agentes.verificar(texto, direccion_input, lengua.codigo, lengua.nombre, resultados)
                 resultados, verificacion = v['resultados'], v['verificacion']
-            resultados = resultados[:4]
+            resultados = resultados[:6 if rapido else 4]
             try:
                 from . import audio_ejemplo
                 for r in resultados:
@@ -214,8 +217,11 @@ class TraducirView(APIView):
             'aviso': salida['aviso'],
             'verificacion': verificacion,
         }
-        from .views_aprendizaje import registrar_consulta
-        data['consulta_id'] = registrar_consulta(request, lengua, direccion_input, texto, salida, verificacion, int((time.time() - t_inicio) * 1000))
+        if rapido:
+            data['consulta_id'] = None
+        else:
+            from .views_aprendizaje import registrar_consulta
+            data['consulta_id'] = registrar_consulta(request, lengua, direccion_input, texto, salida, verificacion, int((time.time() - t_inicio) * 1000))
         return Response(TraducirResponseSerializer(data).data)
 
     @extend_schema(
