@@ -19,7 +19,8 @@ _FUNCIONALES_ES = {
     'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'lo', 'al', 'del',
     'de', 'a', 'en', 'con', 'sin', 'por', 'para', 'sobre', 'entre', 'hacia', 'desde', 'hasta',
     'y', 'e', 'o', 'u', 'ni', 'que', 'se', 'le', 'les', 'me', 'te', 'nos',
-    'es', 'esta', 'estan', 'son', 'hay', 'esta', 'este', 'esto', 'esa', 'ese', 'eso',
+    'es', 'esta', 'estan', 'son', 'hay', 'este', 'esto', 'esa', 'ese', 'eso',
+    'mi', 'mis', 'tu', 'tus', 'su', 'sus', 'nuestro', 'nuestra', 'nuestros', 'nuestras',
 }
 _PUNT = re.compile(r'^[\s,;:.!?¡¿"“”«»()\-]+$')
 

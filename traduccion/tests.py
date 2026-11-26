@@ -162,7 +162,7 @@ class ComposicionTests(TestCase):
         piezas = lexico.piezas_en_texto(texto, 'Kogui', 'es_a_lengua')
         c = composicion.componer(texto, 'es_a_lengua', piezas)
         self.assertEqual(c['frase'], '[mi] Natue [come] [arepa]')
-        self.assertEqual(c['huecos'], ['mi', 'come', 'arepa'])
+        self.assertEqual(c['huecos'], ['come', 'arepa'])   # «mi» es funcional: no se pide a la comunidad
         self.assertFalse(c['completa'])
         self.assertEqual(c['piezas_audio'], ['Natue'])
 
@@ -216,3 +216,13 @@ class AudioFraseTests(TestCase):
         self.assertEqual(resumen['con_audio'], 2)
         self.assertEqual(resumen['faltantes'], ['xyz'])
         self.assertEqual(resumen['jornadas'], ['j2'])
+
+
+class GuardianComposicionTests(TestCase):
+    def test_candidata_semantica_ajena_no_entra_en_la_composicion(self):
+        from .agentes import _tokens_permitidos
+        candidatos = [{'termino': 'Natue', 'termino_es': 'hermano'}, {'termino': 'niuwi neialda gue', 'termino_es': 'buenas tardes'}]
+        piezas = [{'termino_lengua': 'Natue', 'termino_es': 'hermano', 'fragmento': 'hermano'}]
+        permitidos = _tokens_permitidos('mi hermano come arepa', candidatos, piezas)
+        self.assertIn('natue', permitidos)
+        self.assertNotIn('niuwi', permitidos)

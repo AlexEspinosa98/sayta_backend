@@ -101,10 +101,18 @@ def _resto_sin_cubrir(texto: str, parte: str) -> str:
     return ' '.join(w for w in re.split(r'\s+', texto.strip()) if lexico.normalizar(w) and lexico.normalizar(w) not in p)
 
 
-def _tokens_permitidos(candidatos: List[Dict], piezas: List[Dict]) -> set:
+def _tokens_permitidos(texto: str, candidatos: List[Dict], piezas: List[Dict]) -> set:
+    """
+    Vocabulario con el que el verificador puede componer: las piezas halladas DENTRO del texto y
+    las candidatas cuyo lado español realmente aparece en el texto. Una candidata que solo se parece
+    semánticamente («buenas tardes» para «mi hermano come arepa») no puede colarse en la composición.
+    """
     permitidos = set()
+    t_norm = ' ' + lexico.normalizar(texto) + ' '
     for c in candidatos:
-        permitidos.update(lexico.normalizar(c['termino']).split())
+        es = lexico.normalizar(c.get('termino_es', ''))
+        if es and (' ' + es + ' ') in t_norm:
+            permitidos.update(lexico.normalizar(c['termino']).split())
     for p in piezas:
         permitidos.update(lexico.normalizar(p['termino_lengua']).split())
     return permitidos
@@ -191,7 +199,7 @@ def verificar(texto: str, direccion: str, lengua_codigo: str, lengua_nombre: str
     elif compuesta:
         valida = True
         if direccion == 'es_a_lengua':
-            permitidos = _tokens_permitidos(candidatos, piezas)
+            permitidos = _tokens_permitidos(texto, candidatos, piezas)
             fuera = [t for t in lexico.normalizar(final).split() if t not in permitidos]
             if fuera:
                 valida = False
